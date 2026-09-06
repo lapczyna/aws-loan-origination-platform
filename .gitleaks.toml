@@ -1,0 +1,47 @@
+# Gitleaks configuration.
+#
+# Run against the working tree AND the full Git history before this repository
+# is ever made public. See docs/public-release-checklist.md.
+#
+# Allowlisting policy: an entry here must be justified in a comment and must be
+# as narrow as possible. Broad path exclusions are how a real secret gets missed,
+# so nothing under a source, configuration or documentation directory is excluded.
+
+title = "AWS Loan Origination Platform"
+
+[extend]
+# Start from the maintained default rule set and only add to it.
+useDefault = true
+
+[allowlist]
+description = "Paths and patterns that cannot contain a real secret"
+
+paths = [
+  # Build output. Not tracked by Git, but present on a developer machine, where
+  # it contains client configuration dumps from test logs that look like keys.
+  '''^.*/target/.*''',
+  '''^target/.*''',
+  '''^.*/node_modules/.*''',
+  '''^\.git/.*''',
+]
+
+regexes = [
+  # Synthetic markers used by the log-privacy tests. Deliberately fake values
+  # that exist so a test can assert they never reach a log.
+  '''ZZTEST[A-Z]*ZZ''',
+  '''zztestmarkerzz@example\.com''',
+
+  # The standard test card number. Not issuable by any real network.
+  '''4111111111111111''',
+
+  # Local-only Docker Compose credentials, clearly labelled as such and valid
+  # only against a throwaway container on a developer machine.
+  '''change-me-local-only''',
+  '''los_test_only''',
+  '''synthetic-test-pepper-not-a-secret[a-z0-9-]*''',
+  '''test-only-pepper-not-a-secret[a-z0-9-]*''',
+
+  # LocalStack's conventional dummy credentials. They grant access to nothing.
+  '''AWS_ACCESS_KEY_ID=test''',
+  '''AWS_SECRET_ACCESS_KEY=test''',
+]

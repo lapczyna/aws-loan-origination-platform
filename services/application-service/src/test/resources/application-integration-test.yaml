@@ -1,0 +1,43 @@
+# Integration-test profile.
+#
+# Every connection detail is injected at runtime by AbstractIntegrationTest from
+# the Testcontainers instances, so nothing here points at a real host. The
+# settings below only make the tests deterministic and their failures readable.
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate      # Flyway owns the schema in tests exactly as in production.
+  flyway:
+    clean-disabled: true      # Guards against a test ever wiping a real database.
+  kafka:
+    consumer:
+      auto-offset-reset: earliest
+      # Short so a test asserting "the consumer saw it" does not wait on a long poll.
+      properties:
+        fetch.max.wait.ms: 100
+        session.timeout.ms: 10000
+
+los:
+  environment: integration-test
+  security:
+    cors:
+      allowed-origins: "https://client.example.com"
+  outbox:
+    # Small batches and a short backoff so retry behaviour is observable within a
+    # test's lifetime rather than minutes later.
+    batch-size: 10
+    max-attempts: 3
+    base-backoff: PT0.05S
+    max-backoff: PT0.2S
+    send-timeout: PT2S
+
+logging:
+  structured:
+    format:
+      console: ""
+  level:
+    root: WARN
+    com.example.los: DEBUG
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN

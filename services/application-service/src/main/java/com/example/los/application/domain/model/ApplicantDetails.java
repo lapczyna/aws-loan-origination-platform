@@ -90,6 +90,24 @@ public final class ApplicantDetails {
                 residenceCountry.toUpperCase(java.util.Locale.ROOT));
     }
 
+    /**
+     * Rebuilds applicant details that were previously validated and stored.
+     *
+     * <p>Deliberately skips the boundary validation applied by {@link #of}. Data
+     * that was accepted under an older rule must stay readable after the rule
+     * changes: re-validating on read would make historical applications
+     * unloadable at exactly the moment an operator needs to look at them.
+     * Validation belongs at the point of entry, once.
+     */
+    public static ApplicantDetails fromStorage(
+            String givenName,
+            String familyName,
+            String emailAddress,
+            LocalDate dateOfBirth,
+            String residenceCountry) {
+        return new ApplicantDetails(givenName, familyName, emailAddress, dateOfBirth, residenceCountry);
+    }
+
     private static void requireText(String value, String field) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " must not be blank");

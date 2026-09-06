@@ -73,6 +73,19 @@
       <scope>compile</scope>
     </dependency>
 
+    <!--
+      Serves the OIDC discovery document and JWKS for the ephemeral test issuer,
+      so integration tests exercise the real JwtDecoder including issuer and
+      audience validation rather than replacing it with a stub.
+      The shaded standalone build is used to keep WireMock's Jetty off the
+      classpath, where it would collide with the Jetty that Spring Boot manages.
+    -->
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <scope>compile</scope>
+    </dependency>
+
     <!-- Log capture for the sensitive-marker assertions. -->
     <dependency>
       <groupId>ch.qos.logback</groupId>
