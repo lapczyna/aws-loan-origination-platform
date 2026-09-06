@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.example.los</groupId>
+    <artifactId>services</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>audit-service</artifactId>
+  <name>Service :: Audit</name>
+  <description>
+    Consumes business events and writes an append-only, hash-chained audit
+    representation. Audit records carry pseudonymous identifiers and safe
+    metadata only: no request bodies, no document contents and no personal data.
+
+    Locally the records are written to PostgreSQL. The S3 sink adapter targets an
+    encrypted, versioned, Object-Lock-capable audit bucket in the AWS design.
+  </description>
+
+  <dependencies>
+    <!-- Audit sink adapter for the encrypted S3 audit bucket. -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>url-connection-client</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>testcontainers-localstack</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

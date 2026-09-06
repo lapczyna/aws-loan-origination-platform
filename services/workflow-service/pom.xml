@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.example.los</groupId>
+    <artifactId>services</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>workflow-service</artifactId>
+  <name>Service :: Workflow</name>
+  <description>
+    Owns durable workflow state and coordinates the KYC, AML, fraud and credit
+    checks, including retry schedules, deadlines and the approve / reject /
+    manual-review decision. The workflow is a durable state machine persisted in
+    PostgreSQL and driven by events, never a chain of synchronous HTTP calls.
+
+    All four external checks are represented by ports with SIMULATED adapters.
+    No real KYC, AML, fraud or credit bureau system is contacted.
+  </description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+    </dependency>
+
+    <!-- The simulators are reachable over HTTP so that timeouts, retries and
+         circuit breakers exercise a real client, as they would in production. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-restclient</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.wiremock</groupId>
+      <artifactId>wiremock-standalone</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

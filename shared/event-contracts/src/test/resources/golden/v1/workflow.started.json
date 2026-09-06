@@ -1,0 +1,20 @@
+{
+  "eventId": "01J8ZQ3K7M0000000000000010",
+  "eventType": "workflow.started",
+  "schemaVersion": 1,
+  "aggregateType": "Workflow",
+  "aggregateId": "0199a1f0-0000-7000-8000-0000000000w1",
+  "aggregateVersion": 0,
+  "occurredAt": "2026-01-15T09:30:05Z",
+  "correlationId": "0199a1f0-0000-7000-8000-0000000000c1",
+  "causationId": "01J8ZQ3K7M0000000000000001",
+  "metadata": {
+    "producer": "workflow-service",
+    "environment": "local"
+  },
+  "payload": {
+    "applicationId": "0199a1f0-0000-7000-8000-000000000001",
+    "workflowId": "0199a1f0-0000-7000-8000-0000000000w1",
+    "checks": ["KYC", "AML", "FRAUD", "CREDIT_SCORE"]
+  }
+}

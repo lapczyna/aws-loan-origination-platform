@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.example.los</groupId>
+    <artifactId>loan-origination-platform</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>architecture-tests</artifactId>
+  <name>Tests :: Architecture</name>
+  <description>
+    ArchUnit rules that protect the hexagonal dependency direction inside each
+    service, the isolation of the bounded contexts from one another, the absence
+    of cross-service persistence access, and the naming and package conventions.
+
+    These rules live in one module because several of them are cross-context and
+    can only be evaluated with all services on the classpath.
+  </description>
+
+  <properties>
+    <maven.deploy.skip>true</maven.deploy.skip>
+    <maven.install.skip>true</maven.install.skip>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.tngtech.archunit</groupId>
+      <artifactId>archunit-junit6</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>event-contracts</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>application-service</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>document-service</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>workflow-service</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>audit-service</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

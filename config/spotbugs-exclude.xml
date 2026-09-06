@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FindBugsFilter xmlns="https://github.com/spotbugs/filter/3.0.0">
+
+  <!--
+    Every exclusion here is a deliberate, justified decision. An exclusion
+    without a stated reason is not acceptable in review: silencing an analyser
+    without understanding the finding is how real defects get shipped.
+  -->
+
+  <!-- Records generate accessors that return the component directly. For the
+       immutable value objects used here that is the intended design, and the
+       collections they hold are already defensively copied in the constructor. -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    <Source name="~.*/domain/model/.*"/>
+  </Match>
+
+  <!-- Generated Spring configuration classes and JPA entities trip several
+       heuristics that do not apply to framework-managed types. -->
+  <Match>
+    <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    <Source name="~.*/adapter/out/persistence/.*Entity\.java"/>
+  </Match>
+
+</FindBugsFilter>

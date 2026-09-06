@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.example.los</groupId>
+    <artifactId>loan-origination-platform</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>event-contracts</artifactId>
+  <name>Shared :: Event Contracts</name>
+  <description>
+    Versioned, cross-context event contracts published to Kafka: the envelope,
+    the payload records, the shared vocabulary and the single canonical JSON
+    mapping used by every producer and consumer.
+
+    The module depends on Jackson and nothing else. It must never depend on
+    Spring, on persistence, or on any service, so that the wire contract stays
+    independent of the runtime that happens to implement it.
+  </description>
+
+  <dependencies>
+    <!--
+      Jackson 3 lives under tools.jackson.*; annotations remain under
+      com.fasterxml.jackson.annotation. java.time support is built into Jackson 3
+      core, so no jsr310 module is required.
+    -->
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+  </dependencies>
+</project>

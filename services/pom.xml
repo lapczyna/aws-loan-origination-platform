@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.example.los</groupId>
+    <artifactId>loan-origination-platform</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>services</artifactId>
+  <packaging>pom</packaging>
+  <name>Services</name>
+  <description>
+    Aggregator and shared parent for the deployable services. It carries the
+    dependencies every service needs (web, persistence, security, messaging,
+    observability, resilience) so the individual service POMs describe only what
+    is distinctive about that bounded context.
+  </description>
+
+  <modules>
+    <module>application-service</module>
+    <module>document-service</module>
+    <module>workflow-service</module>
+    <module>audit-service</module>
+  </modules>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>event-contracts</artifactId>
+    </dependency>
+
+    <!-- Web tier. spring-boot-starter-webmvc is the Boot 4 name and already
+         brings spring-boot-starter, Tomcat and Jackson. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-webmvc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <!-- Persistence. Every service owns its own schema. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-database-postgresql</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Security: OAuth2 resource server validating JWTs issued by an external IdP. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+    </dependency>
+
+    <!-- Messaging. -->
+    <dependency>
+      <groupId>org.springframework.kafka</groupId>
+      <artifactId>spring-kafka</artifactId>
+    </dependency>
+    <!--
+      MSK IAM authentication callback handler. Runtime-only and referenced solely
+      by the "aws" Spring profile; the "local" profile talks PLAINTEXT to a
+      container and never loads it.
+    -->
+    <dependency>
+      <groupId>software.amazon.msk</groupId>
+      <artifactId>aws-msk-iam-auth</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Observability. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-actuator</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-exporter-otlp</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <!-- Activated only by the "aws" profile, so local runs never call AWS. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-cloudwatch2</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Resilience. resilience4j-spring-boot4 is required: the -spring-boot3
+         artifact is built against Boot 3 autoconfiguration and will not start. -->
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-spring-boot4</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-micrometer</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-aspectj</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>test-support</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <!--
+            The executable jar is published under the "exec" classifier so the
+            plain library jar remains the module's main artifact. Without this,
+            repackaging rewrites the main jar with classes under BOOT-INF/ and
+            the architecture and end-to-end test modules cannot depend on the
+            service classes. Container images copy the *-exec.jar.
+          -->
+          <classifier>exec</classifier>
+        </configuration>
+        <executions>
+          <execution>
+            <id>repackage</id>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

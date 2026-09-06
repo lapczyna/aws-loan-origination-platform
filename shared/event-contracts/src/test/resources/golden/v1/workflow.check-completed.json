@@ -1,0 +1,24 @@
+{
+  "eventId": "01J8ZQ3K7M0000000000000011",
+  "eventType": "workflow.check-completed",
+  "schemaVersion": 1,
+  "aggregateType": "Workflow",
+  "aggregateId": "0199a1f0-0000-7000-8000-0000000000w1",
+  "aggregateVersion": 2,
+  "occurredAt": "2026-01-15T09:30:20Z",
+  "correlationId": "0199a1f0-0000-7000-8000-0000000000c1",
+  "causationId": "01J8ZQ3K7M0000000000000010",
+  "metadata": {
+    "producer": "workflow-service",
+    "environment": "local"
+  },
+  "payload": {
+    "applicationId": "0199a1f0-0000-7000-8000-000000000001",
+    "workflowId": "0199a1f0-0000-7000-8000-0000000000w1",
+    "checkType": "CREDIT_SCORE",
+    "outcome": "PASSED",
+    "reasonCode": "SCORE_ABOVE_THRESHOLD",
+    "score": 742,
+    "attempt": 1
+  }
+}

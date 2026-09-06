@@ -1,0 +1,33 @@
+# Keep the Docker build context small and free of anything sensitive.
+# Only the Maven build inputs are needed; everything else is excluded.
+
+.git
+.github
+.idea
+.vscode
+**/target
+**/node_modules
+**/.terraform
+**/*.tfstate*
+**/*.tfplan*
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+**/*.p12
+**/*.jks
+local-dev-keys/
+kubeconfig*
+docs
+infrastructure
+deploy/helm
+deploy/kubernetes
+tests/performance
+tests/security
+*.md
+!README.md
+Makefile
+logs
+data
+.localstack

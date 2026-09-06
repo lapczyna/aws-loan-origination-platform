@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.example.los</groupId>
+  <artifactId>loan-origination-platform</artifactId>
+  <version>0.1.0</version>
+  <packaging>pom</packaging>
+
+  <name>AWS Loan Origination Platform</name>
+  <description>
+    Reference implementation of a cloud-native loan origination platform.
+    Nothing in this repository has been deployed to AWS.
+  </description>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <modules>
+    <module>shared/event-contracts</module>
+    <module>shared/test-support</module>
+    <module>services</module>
+    <module>tests/architecture</module>
+    <module>tests/end-to-end</module>
+  </modules>
+
+  <properties>
+    <java.version>25</java.version>
+    <maven.compiler.release>25</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+    <!--
+      Fixed timestamp so repeated builds of identical sources produce byte-identical
+      artifacts (reproducible builds). Bump deliberately at release time.
+    -->
+    <project.build.outputTimestamp>2026-01-01T00:00:00Z</project.build.outputTimestamp>
+
+    <!--
+      Versions NOT managed by spring-boot-dependencies 4.1.1.
+      Every entry is an explicit stable release. Milestone, snapshot,
+      release-candidate, alpha and beta versions are banned by policy and by
+      the Maven Enforcer rules below.
+
+      Deliberately absent because Spring Boot 4.1.1 already manages them:
+        Spring Framework 7.0.9   Spring Security 7.1.1   Spring Kafka 4.1.1
+        Flyway 12.4.0            Micrometer 1.17.1       Micrometer Tracing 1.7.1
+        OpenTelemetry 1.62.0     Testcontainers 2.0.5    Jackson 3.1.5
+        JUnit 6.0.3              AssertJ 3.27.7          Mockito 5.23.0
+        PostgreSQL driver 42.7.13
+    -->
+    <springdoc.version>3.1.0</springdoc.version>
+    <awssdk.version>2.54.13</awssdk.version>
+    <msk-iam-auth.version>2.3.8</msk-iam-auth.version>
+    <resilience4j.version>2.4.0</resilience4j.version>
+    <archunit.version>1.5.0</archunit.version>
+    <wiremock.version>3.13.2</wiremock.version>
+    <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+    <spotless-maven-plugin.version>3.10.2</spotless-maven-plugin.version>
+    <spotbugs-maven-plugin.version>4.10.4.1</spotbugs-maven-plugin.version>
+
+    <!-- Integration tests are enabled by default; -Pfast turns them off. -->
+    <skipITs>false</skipITs>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>bom</artifactId>
+        <version>${awssdk.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-bom</artifactId>
+        <version>${resilience4j.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+
+      <!-- Internal modules. -->
+      <dependency>
+        <groupId>com.example.los</groupId>
+        <artifactId>event-contracts</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.example.los</groupId>
+        <artifactId>test-support</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.example.los</groupId>
+        <artifactId>application-service</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.example.los</groupId>
+        <artifactId>document-service</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.example.los</groupId>
+        <artifactId>workflow-service</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.example.los</groupId>
+        <artifactId>audit-service</artifactId>
+        <version>${project.version}</version>
+      </dependency>
+
+      <!-- Third-party libraries outside the Spring Boot BOM. -->
+      <dependency>
+        <groupId>org.springdoc</groupId>
+        <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+        <version>${springdoc.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>software.amazon.msk</groupId>
+        <artifactId>aws-msk-iam-auth</artifactId>
+        <version>${msk-iam-auth.version}</version>
+      </dependency>
+      <!--
+        resilience4j-bom 2.4.0 still lists only the Spring Boot 3 starter, so the
+        Spring Boot 4 starter has to be managed explicitly. Same release train.
+      -->
+      <dependency>
+        <groupId>io.github.resilience4j</groupId>
+        <artifactId>resilience4j-spring-boot4</artifactId>
+        <version>${resilience4j.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>com.tngtech.archunit</groupId>
+        <artifactId>archunit-junit6</artifactId>
+        <version>${archunit.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.wiremock</groupId>
+        <artifactId>wiremock-standalone</artifactId>
+        <version>${wiremock.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>${jacoco-maven-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>com.diffplug.spotless</groupId>
+          <artifactId>spotless-maven-plugin</artifactId>
+          <version>${spotless-maven-plugin.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>com.github.spotbugs</groupId>
+          <artifactId>spotbugs-maven-plugin</artifactId>
+          <version>${spotbugs-maven-plugin.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-platform-rules</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireMavenVersion>
+                  <version>[3.9.6,)</version>
+                </requireMavenVersion>
+                <requireJavaVersion>
+                  <version>[25,)</version>
+                </requireJavaVersion>
+                <requireReleaseDeps>
+                  <message>SNAPSHOT dependencies are not permitted in this platform.</message>
+                </requireReleaseDeps>
+                <banDuplicatePomDependencyVersions/>
+                <bannedDependencies>
+                  <searchTransitive>true</searchTransitive>
+                  <excludes>
+                    <exclude>junit:junit</exclude>
+                    <exclude>log4j:log4j</exclude>
+                    <exclude>org.apache.logging.log4j:log4j-core:[,2.17.0)</exclude>
+                  </excludes>
+                  <!--
+                    commons-logging is deliberately NOT banned: Spring Framework 7
+                    removed the spring-jcl shim and depends on the real
+                    commons-logging artifact, so banning it would ban Spring itself.
+                  -->
+                  <message>JUnit 4, Log4j 1.x and Log4j 2 versions below 2.17.0 are not permitted.</message>
+                </bannedDependencies>
+              </rules>
+              <fail>true</fail>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <configuration>
+          <java>
+            <includes>
+              <include>src/main/java/**/*.java</include>
+              <include>src/test/java/**/*.java</include>
+            </includes>
+            <!--
+              A full AST-rewriting formatter (google-java-format / palantir) is
+              deliberately not used: those engines reach into javac internals and
+              are not verified against JDK 25. The rules below are engine
+              independent and enforce the conventions declared in .editorconfig.
+            -->
+            <removeUnusedImports>
+              <engine>cleanthat-javaparser-unnecessaryimport</engine>
+            </removeUnusedImports>
+            <!-- JDK, then Jakarta, then third party, then our own code, then
+                 static imports last. "\#" is Spotless notation for the static group. -->
+            <importOrder>
+              <order>java,javax,jakarta,,com.example.los,\#</order>
+            </importOrder>
+            <trimTrailingWhitespace/>
+            <endWithNewline/>
+            <indent>
+              <spaces>true</spaces>
+              <spacesPerTab>4</spacesPerTab>
+            </indent>
+            <toggleOffOn/>
+          </java>
+          <formats>
+            <format>
+              <includes>
+                <include>src/main/resources/**/*.yaml</include>
+                <include>src/main/resources/**/*.yml</include>
+                <include>src/main/resources/db/migration/**/*.sql</include>
+              </includes>
+              <trimTrailingWhitespace/>
+              <endWithNewline/>
+            </format>
+          </formats>
+        </configuration>
+        <executions>
+          <execution>
+            <id>spotless-check</id>
+            <phase>validate</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>jacoco-prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>jacoco-report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <skipITs>${skipITs}</skipITs>
+        </configuration>
+        <executions>
+          <execution>
+            <id>integration-tests</id>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!-- Fast feedback: unit tests only, no Docker daemon required. -->
+    <profile>
+      <id>fast</id>
+      <properties>
+        <skipITs>true</skipITs>
+      </properties>
+    </profile>
+
+    <!--
+      Static analysis, kept opt-in so an analyser incompatible with a new JDK
+      can never block the primary build. CI runs it as its own step.
+    -->
+    <profile>
+      <id>analysis</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>com.github.spotbugs</groupId>
+            <artifactId>spotbugs-maven-plugin</artifactId>
+            <configuration>
+              <effort>Max</effort>
+              <threshold>Medium</threshold>
+              <includeTests>false</includeTests>
+              <excludeFilterFile>${maven.multiModuleProjectDirectory}/config/spotbugs-exclude.xml</excludeFilterFile>
+            </configuration>
+            <executions>
+              <execution>
+                <id>spotbugs-check</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>check</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!-- CycloneDX Software Bill of Materials, published as a CI artifact. -->
+    <profile>
+      <id>sbom</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.cyclonedx</groupId>
+            <artifactId>cyclonedx-maven-plugin</artifactId>
+            <configuration>
+              <projectType>application</projectType>
+              <schemaVersion>1.6</schemaVersion>
+              <outputFormat>json</outputFormat>
+              <outputName>${project.artifactId}-sbom</outputName>
+            </configuration>
+            <executions>
+              <execution>
+                <id>cyclonedx-package</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>makeBom</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

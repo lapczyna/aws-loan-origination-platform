@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.example.los</groupId>
+    <artifactId>loan-origination-platform</artifactId>
+    <version>0.1.0</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>end-to-end-tests</artifactId>
+  <name>Tests :: End To End</name>
+  <description>
+    Cross-service end-to-end scenarios. All four services are started as separate
+    Spring application contexts inside one JVM, wired to shared PostgreSQL, Kafka
+    and LocalStack containers, so the tests exercise the real HTTP APIs, the real
+    outbox, real Kafka delivery and real presigned S3 uploads.
+
+    The Docker Compose stack is verified separately by scripts/local-smoke-test.sh.
+  </description>
+
+  <properties>
+    <maven.deploy.skip>true</maven.deploy.skip>
+    <maven.install.skip>true</maven.install.skip>
+    <!-- Unit-test phase is unused here; everything runs under Failsafe. -->
+    <skipTests>true</skipTests>
+    <skipITs>false</skipITs>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>test-support</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>application-service</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>document-service</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>workflow-service</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>audit-service</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

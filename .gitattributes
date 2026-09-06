@@ -1,0 +1,26 @@
+# Normalise line endings so the repository is identical on Windows, Linux and macOS.
+* text=auto eol=lf
+
+# Scripts that must keep LF endings to remain executable inside Linux containers.
+*.sh            text eol=lf
+mvnw            text eol=lf
+Makefile        text eol=lf
+Dockerfile      text eol=lf
+*.Dockerfile    text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.cmd           text eol=crlf
+*.bat           text eol=crlf
+*.ps1           text eol=crlf
+
+# Binary content: never diff, never normalise.
+*.png           binary
+*.jpg           binary
+*.gif           binary
+*.pdf           binary
+*.zip           binary
+*.jar           binary
+
+# Generated or vendored files excluded from language statistics and diffs.
+docs/api/openapi.yaml   linguist-generated=false
+*.lock                  -diff

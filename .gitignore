@@ -1,0 +1,137 @@
+# ---------------------------------------------------------------------------
+# This repository is written on the assumption that every file and every commit
+# may eventually become publicly visible. Anything that could carry a secret,
+# a credential, customer data or internal infrastructure detail is ignored here.
+# See docs/public-release-checklist.md before changing repository visibility.
+# ---------------------------------------------------------------------------
+
+# --- Secrets and credentials (never commit) --------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.truststore
+id_rsa
+id_ed25519
+*.ppk
+credentials
+.credentials
+.netrc
+.npmrc
+.pypirc
+secrets.yaml
+secrets.yml
+secrets.json
+*secret*.yaml
+*secret*.yml
+!**/templates/*secret*.yaml
+local-dev-keys/
+.aws/
+.kube/
+kubeconfig
+kubeconfig.*
+*.kubeconfig
+
+# --- Terraform --------------------------------------------------------------
+.terraform/
+.terraform.lock.hcl.bak
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tfplan.*
+plan.out
+plan.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+*.auto.tfvars
+terraform.tfvars
+!terraform.tfvars.example
+!*.auto.tfvars.example
+
+# --- Java / Maven -----------------------------------------------------------
+target/
+!.mvn/wrapper/maven-wrapper.properties
+.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+.flattened-pom.xml
+dependency-reduced-pom.xml
+
+# --- Build / scan outputs ---------------------------------------------------
+build/
+out/
+dist/
+bin/
+*.sbom.json
+sbom/
+*.cyclonedx.json
+*.spdx.json
+gitleaks-report.json
+trivy-report.*
+checkov-report.*
+.scannerwork/
+
+# --- IDE / editor -----------------------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+.factorypath
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Local runtime data -----------------------------------------------------
+logs/
+*.log
+data/
+.localstack/
+volumes/
+pgdata/
+tmp/
+temp/
+
+# --- Node (tooling only: OpenAPI lint, k6 helpers) --------------------------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+
+# --- Python (tooling only: checkov, pre-commit) -----------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.tox/
+
+# --- Test / coverage --------------------------------------------------------
+.jacoco/
+jacoco.exec
+*.exec
+surefire-reports/
+failsafe-reports/
+allure-results/
+k6-results/
