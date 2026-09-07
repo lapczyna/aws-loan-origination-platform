@@ -23,6 +23,8 @@ docs
 infrastructure
 deploy/helm
 deploy/kubernetes
+deploy/compose
+# deploy/docker is NOT excluded: the image copies its healthcheck script in.
 tests/performance
 tests/security
 *.md

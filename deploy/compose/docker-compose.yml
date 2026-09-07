@@ -1,0 +1,408 @@
+# =============================================================================
+# Local development platform.
+#
+# THIS IS THE DEFAULT AND ONLY EXECUTION PATH FOR THIS REPOSITORY. Everything
+# here runs on a developer machine, costs nothing, and reaches no AWS account.
+# LocalStack provides the S3 and Secrets Manager APIs; no real AWS credential is
+# used, and none would work.
+#
+#   make local-up            start everything
+#   make local-smoke-test    run the happy path against it
+#   make local-down          stop, KEEPING data
+#   make local-clean         stop and DELETE the volumes
+#
+# Every image is pinned by digest. A tag is mutable, so a tag-pinned stack is a
+# stack that silently changes underneath the team.
+#
+# All data is synthetic. All credentials are local-only, clearly labelled, and
+# grant access to nothing outside these containers.
+# =============================================================================
+
+name: los-local
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  # Matches the Kubernetes securityContext, so a problem caused by running
+  # unprivileged with a read-only root filesystem shows up here rather than on
+  # first deployment.
+  read_only: true
+  tmpfs:
+    # Owned by the container's UID, because the process runs as 10001 and a
+    # tmpfs defaults to root-owned -- Tomcat then cannot create its work
+    # directory and the service will not start. The Kubernetes equivalent is an
+    # emptyDir with fsGroup set to the same UID.
+    #
+    # noexec and nosuid: nothing legitimate ever executes from this directory,
+    # and denying it removes a convenient staging area for anything that does
+    # get a foothold.
+    - /tmp/los:rw,noexec,nosuid,size=64m,uid=10001,gid=10001,mode=0700
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  # Small on purpose: four JVMs on a laptop. MaxRAMPercentage in the image sizes
+  # each heap from this limit.
+  deploy:
+    resources:
+      limits:
+        memory: 768M
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+x-service-environment: &service-environment
+  SPRING_PROFILES_ACTIVE: local
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: los
+  # Synthetic local-only credentials. Not a secret: they work only against the
+  # throwaway container below.
+  POSTGRES_USER: los_local
+  POSTGRES_PASSWORD: change-me-local-only
+  KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  AWS_REGION: eu-west-1
+  AWS_ENDPOINT_URL: http://localstack:4566
+  # LocalStack's conventional dummy credentials. They grant access to nothing.
+  AWS_ACCESS_KEY_ID: test
+  AWS_SECRET_ACCESS_KEY: test
+  OAUTH2_ISSUER_URI: http://oidc-issuer:8080/default
+  LOS_ENVIRONMENT: local
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL. One instance holding one schema per bounded context, which
+  # mirrors how the services are isolated in AWS without needing four RDS
+  # instances on a laptop. The per-service database ROLES are created by the
+  # init script, so the least-privilege grants in each service's migrations
+  # actually apply here rather than silently no-opping.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:17.6-alpine@sha256:ef257d85f76e48da1c64832459b59fcaba1a4dac97bf5d7450c77753542eee94
+    container_name: los-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: los
+      POSTGRES_USER: los_local
+      POSTGRES_PASSWORD: change-me-local-only
+      # Deterministic collation, so an ORDER BY behaves the same on every
+      # developer machine and in CI.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U los_local -d los"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Apache Kafka in KRaft mode: no ZooKeeper, one container.
+  #
+  # Two listeners, because containers and the host reach the broker at different
+  # addresses. Kafka advertises a hostname to clients, so a single listener would
+  # give either the host or the containers an address they cannot resolve.
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:4.0.0@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75
+    container_name: los-kafka
+    restart: unless-stopped
+    ports:
+      - "19092:19092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:29093
+      KAFKA_LISTENERS: INTERNAL://:9092,HOST://:19092,CONTROLLER://:29093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,HOST://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # Single broker locally, so replication of 1 is the only option. Production
+      # runs three brokers across Availability Zones with min.insync.replicas=2;
+      # see infrastructure/terraform/modules/msk.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      # Off, exactly as in production. Topics are created deliberately by the
+      # init container below, so a typo in a topic name fails loudly instead of
+      # silently creating an empty topic nobody is reading.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: los-local-cluster-000001
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # Creates the topics, then exits. A short-lived init container rather than
+  # application startup, because production must not let an application create
+  # topics: a service that can create a topic can create the wrong one, with the
+  # wrong partition count, and nothing will notice until throughput matters.
+  # ---------------------------------------------------------------------------
+  kafka-init:
+    image: apache/kafka:4.0.0@sha256:3f7b939115cd4872e9cee9369d80bd69712fde55f9902f46d793f64848dedc75
+    container_name: los-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "/scripts/create-topics.sh"]
+    volumes:
+      - ./kafka-init:/scripts:ro
+    restart: "no"
+
+  # ---------------------------------------------------------------------------
+  # LocalStack: the S3 and Secrets Manager APIs, locally.
+  #
+  # S3_SKIP_SIGNATURE_VALIDATION=0 makes it actually verify presigned signatures
+  # and expiry. Left at the default it accepts anything, and the whole presigned
+  # upload flow would appear to work while proving nothing.
+  # ---------------------------------------------------------------------------
+  localstack:
+    image: localstack/localstack:4.0.3@sha256:17c2f79ca4e1f804eb912291a19713d4134806325ef0d21d4c1053161dfa72d0
+    container_name: los-localstack
+    restart: unless-stopped
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: s3,secretsmanager
+      DEBUG: "0"
+      S3_SKIP_SIGNATURE_VALIDATION: "0"
+      AWS_DEFAULT_REGION: eu-west-1
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./localstack-init:/etc/localstack/init/ready.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health | grep -q '\"s3\": *\"available\\|running\"'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # A local OIDC issuer, so the services validate real signed tokens rather than
+  # running with security disabled. Security that is switched off locally is
+  # security that is first exercised in production.
+  #
+  # The signing key is generated inside the container at startup and never
+  # leaves it. No key material is committed to this repository.
+  # ---------------------------------------------------------------------------
+  oidc-issuer:
+    image: ghcr.io/navikt/mock-oauth2-server:2.1.10
+    container_name: los-oidc-issuer
+    restart: unless-stopped
+    ports:
+      - "8090:8080"
+    environment:
+      # Audience and scopes match what the services expect. Tokens are minted on
+      # demand by scripts/local-token.sh.
+      JSON_CONFIG: >
+        {
+          "interactiveLogin": false,
+          "tokenCallbacks": [
+            {
+              "issuerId": "default",
+              "tokenExpiry": 3600,
+              "requestMappings": [
+                {
+                  "requestParam": "scope",
+                  "match": "*",
+                  "claims": {
+                    "aud": ["los-local-api"],
+                    "scope": "applications:read applications:write documents:read documents:write manual-review:read manual-review:decide"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+    # No healthcheck: the image is distroless and has no shell to run one in.
+    # It is not needed either -- the services discover this issuer lazily, on
+    # the first token they have to validate, so none of them depends on it
+    # being reachable at startup.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ---------------------------------------------------------------------------
+  # The four services.
+  #
+  # Each waits for the infrastructure it needs to be HEALTHY, not merely
+  # started. Waiting on "started" is how a service races an empty database and
+  # crash-loops for thirty seconds before anything works.
+  # ---------------------------------------------------------------------------
+  application-service:
+    <<: *service-defaults
+    image: los/application-service:${LOS_VERSION:-0.1.0}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/service.Dockerfile
+      args:
+        SERVICE_NAME: application-service
+        VERSION: ${LOS_VERSION:-0.1.0}
+    container_name: los-application-service
+    ports:
+      - "8081:8081"
+    environment:
+      <<: *service-environment
+      SERVER_PORT: "8081"
+      # The pepper is a FILE mounted read-only below, exactly as the Secrets
+      # Store CSI driver projects it in AWS.
+      APPLICANT_PEPPER_FILE: /etc/secrets/applicant-pepper
+    volumes:
+      # The applicant pseudonymisation pepper, generated by
+      # scripts/generate-local-secrets.sh into a gitignored directory. Mounted
+      # read-only as a FILE, exactly as the Secrets Store CSI driver does in AWS,
+      # so the service exercises the same code path in both places.
+      - ../../local-dev-keys:/etc/secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      oidc-issuer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck", "8081"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  document-service:
+    <<: *service-defaults
+    image: los/document-service:${LOS_VERSION:-0.1.0}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/service.Dockerfile
+      args:
+        SERVICE_NAME: document-service
+        VERSION: ${LOS_VERSION:-0.1.0}
+    container_name: los-document-service
+    ports:
+      - "8082:8082"
+    environment:
+      <<: *service-environment
+      SERVER_PORT: "8082"
+      DOCUMENTS_BUCKET: los-local-documents
+      # The service reaches LocalStack over the Docker network; whoever follows
+      # the presigned URL is on the host. The signature covers the host, so the
+      # two endpoints must be signed for separately.
+      AWS_PRESIGN_ENDPOINT_URL: http://localhost:4566
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      localstack:
+        condition: service_healthy
+      oidc-issuer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck", "8082"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  workflow-service:
+    <<: *service-defaults
+    image: los/workflow-service:${LOS_VERSION:-0.1.0}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/service.Dockerfile
+      args:
+        SERVICE_NAME: workflow-service
+        VERSION: ${LOS_VERSION:-0.1.0}
+    container_name: los-workflow-service
+    ports:
+      - "8083:8083"
+    environment:
+      <<: *service-environment
+      SERVER_PORT: "8083"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      oidc-issuer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck", "8083"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+  audit-service:
+    <<: *service-defaults
+    image: los/audit-service:${LOS_VERSION:-0.1.0}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/service.Dockerfile
+      args:
+        SERVICE_NAME: audit-service
+        VERSION: ${LOS_VERSION:-0.1.0}
+    container_name: los-audit-service
+    ports:
+      - "8084:8084"
+    environment:
+      <<: *service-environment
+      SERVER_PORT: "8084"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+      oidc-issuer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck", "8084"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+# Named volumes, so `make local-down` stops the stack without destroying a
+# developer's data. Only `make local-clean` removes these.
+volumes:
+  postgres-data:
+  kafka-data:
+  localstack-data:

@@ -28,6 +28,23 @@ import software.amazon.awssdk.services.s3.presigner.S3Presigner;
  * LocalStack the conventional dummy credentials are used, and they grant access
  * to nothing outside a local container.
  *
+ * <h2>Why the presigner can use a different endpoint from the client</h2>
+ *
+ * <p>The service and the client reach S3 by different routes, and the presigned
+ * URL has to be signed for the route the CLIENT will take. The host is part of
+ * the SigV4 signature, so a URL signed for one hostname and sent to another is
+ * rejected.
+ *
+ * <p>Locally the service reaches LocalStack at {@code localstack:4566} on the
+ * Docker network while a browser reaches it at {@code localhost:4566}. The same
+ * split exists in AWS whenever the service egresses through an S3 VPC endpoint
+ * while clients use the public endpoint. One override for the client and another
+ * for the presigner is therefore not a local workaround: it is the shape the
+ * problem actually has.
+ *
+ * <p>The presigner override defaults to the client's, so an environment where
+ * both routes are the same needs no extra configuration.
+ *
  * <h2>Path-style addressing</h2>
  *
  * <p>Forced on only when an endpoint override is configured, which in practice
@@ -66,15 +83,21 @@ class S3Config {
     @Bean
     S3Presigner s3Presigner(
             @Value("${los.aws.region}") String region,
-            @Value("${los.aws.endpoint-override:}") String endpointOverride) {
+            @Value("${los.aws.endpoint-override:}") String endpointOverride,
+            @Value("${los.aws.presign-endpoint-override:}") String presignEndpointOverride) {
+
+        // Falls back to the client's endpoint when no separate one is set, so
+        // an environment where both routes are identical needs no extra config.
+        String effectiveEndpoint =
+                hasEndpointOverride(presignEndpointOverride) ? presignEndpointOverride : endpointOverride;
 
         var builder = S3Presigner.builder()
                 .region(Region.of(region))
                 .serviceConfiguration(S3Configuration.builder()
-                        .pathStyleAccessEnabled(hasEndpointOverride(endpointOverride))
+                        .pathStyleAccessEnabled(hasEndpointOverride(effectiveEndpoint))
                         .build());
 
-        applyEndpointAndCredentials(builder::endpointOverride, builder::credentialsProvider, endpointOverride);
+        applyEndpointAndCredentials(builder::endpointOverride, builder::credentialsProvider, effectiveEndpoint);
         return builder.build();
     }
 

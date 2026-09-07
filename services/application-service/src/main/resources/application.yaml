@@ -171,7 +171,7 @@ los:
     # Placeholder issuer on a reserved example domain. Replace with your own
     # identity provider. Never commit a real Cognito user-pool URL or tenant id.
     accepted-audiences: los-local-api
-    applicant-pepper-file: ./local-dev-keys/applicant-pepper
+    applicant-pepper-file: ${APPLICANT_PEPPER_FILE:./local-dev-keys/applicant-pepper}
     cors:
       # No origin is permitted unless explicitly configured.
       allowed-origins: ""

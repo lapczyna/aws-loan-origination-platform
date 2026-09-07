@@ -180,6 +180,9 @@ los:
     # Empty in AWS: the SDK resolves the real endpoint and the pod's IAM role.
     # Set only for LocalStack, which also switches on path-style addressing.
     endpoint-override: ""
+    # The endpoint a CLIENT will use. Defaults to the one above; set it only
+    # where the service and its clients reach S3 by different routes.
+    presign-endpoint-override: ""
 
   documents:
     bucket: los-local-documents
@@ -271,6 +274,9 @@ los:
     # the presigner to path-style addressing, which LocalStack requires.
     region: ${AWS_REGION:eu-west-1}
     endpoint-override: ${AWS_ENDPOINT_URL:http://localhost:4566}
+    # The service talks to LocalStack over the Docker network; the client that
+    # follows the presigned URL is on the host and reaches it at localhost.
+    presign-endpoint-override: ${AWS_PRESIGN_ENDPOINT_URL:http://localhost:4566}
   documents:
     bucket: ${DOCUMENTS_BUCKET:los-local-documents}
 
@@ -330,6 +336,9 @@ los:
     # Empty: the SDK resolves the real S3 endpoint, and the pod's IAM role
     # through EKS Pod Identity. No access key exists anywhere.
     endpoint-override: ""
+    # Set this only if the service egresses through an S3 VPC endpoint while
+    # clients use the public one.
+    presign-endpoint-override: ${LOS_S3_PRESIGN_ENDPOINT:}
   documents:
     bucket: ${LOS_DOCUMENTS_BUCKET}
 

@@ -10,13 +10,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.core.OAuth2TokenValidator;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtClaimValidator;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.jwt.JwtDecoders;
-import org.springframework.security.oauth2.jwt.JwtValidators;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -84,27 +78,21 @@ class SecurityConfig {
     /**
      * Decoder validating signature, expiry, issuer and audience.
      *
+     * <p>Discovery is deferred to the first token that needs validating. Doing
+     * it at startup would let a momentary identity-provider blip stop this
+     * service from starting at all — worst of all during a rolling deployment,
+     * when every new pod is starting at once. See {@link LazyIssuerJwtDecoder}.
+     *
      * @param issuerUri the identity provider's issuer URI; a placeholder by
-     *                  default, never a real tenant, so no environment identifier
-     *                  is committed to this repository
+     *                  default, never a real tenant, so no environment
+     *                  identifier is committed to this repository
      * @param audiences the audience values this API accepts
      */
     @Bean
     JwtDecoder jwtDecoder(
             @Value("${spring.security.oauth2.resourceserver.jwt.issuer-uri}") String issuerUri,
             @Value("${los.security.accepted-audiences}") List<String> audiences) {
-
-        NimbusJwtDecoder decoder = (NimbusJwtDecoder) JwtDecoders.fromIssuerLocation(issuerUri);
-
-        OAuth2TokenValidator<Jwt> audienceValidator = new JwtClaimValidator<List<String>>(
-                "aud",
-                claim -> claim != null && claim.stream().anyMatch(audiences::contains));
-
-        decoder.setJwtValidator(
-                new org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator<>(
-                        JwtValidators.createDefaultWithIssuer(issuerUri), audienceValidator));
-
-        return decoder;
+        return new LazyIssuerJwtDecoder(issuerUri, audiences);
     }
 
     /**
