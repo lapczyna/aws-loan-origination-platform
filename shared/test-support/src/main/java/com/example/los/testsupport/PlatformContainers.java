@@ -79,7 +79,13 @@ public final class PlatformContainers {
     public static synchronized LocalStackContainer localstack() {
         if (localstack == null) {
             localstack = new LocalStackContainer(LOCALSTACK_IMAGE)
-                    .withServices(LocalStackContainer.Service.S3, LocalStackContainer.Service.SECRETSMANAGER);
+                    .withServices(LocalStackContainer.Service.S3, LocalStackContainer.Service.SECRETSMANAGER)
+                    // LocalStack accepts any request to a presigned URL by
+                    // default, validating neither the signature nor the expiry.
+                    // Left at the default, a test asserting that a tampered or
+                    // expired URL is refused would pass against real S3 and
+                    // silently prove nothing here.
+                    .withEnv("S3_SKIP_SIGNATURE_VALIDATION", "0");
             localstack.start();
         }
         return localstack;

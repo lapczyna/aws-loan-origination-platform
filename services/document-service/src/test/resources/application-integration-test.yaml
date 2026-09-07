@@ -1,0 +1,37 @@
+# Integration-test profile for the document service.
+#
+# S3 comes from LocalStack, injected at runtime. Nothing here points at real AWS,
+# and no real credential is used or needed.
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    clean-disabled: true
+
+los:
+  environment: integration-test
+  documents:
+    # Short enough that the expiry test does not slow the suite down.
+    presigned-url-validity: PT2M
+  scanner:
+    simulated-latency: PT0S
+    batch-size: 20
+  outbox:
+    batch-size: 10
+    max-attempts: 3
+    base-backoff: PT0.05S
+    max-backoff: PT0.2S
+    send-timeout: PT2S
+
+logging:
+  structured:
+    format:
+      console: ""
+  level:
+    root: WARN
+    com.example.los: DEBUG
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
+    software.amazon.awssdk: WARN

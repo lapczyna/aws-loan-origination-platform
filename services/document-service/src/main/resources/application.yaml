@@ -1,0 +1,349 @@
+# =============================================================================
+# Document service configuration.
+#
+# THIS FILE CONTAINS NO SECRETS AND NEVER WILL.
+#
+# Credentials, the applicant pseudonymisation pepper and any other secret are
+# supplied as FILES: in AWS they are projected into the pod from AWS Secrets
+# Manager by the Secrets Store CSI driver and read through a Spring config tree;
+# locally they are generated into a gitignored directory by
+# scripts/generate-local-secrets.sh. Nothing secret is ever supplied as a
+# property or an environment variable, because both are visible in a pod spec,
+# in `docker inspect` and in crash dumps.
+#
+# Every host name and issuer below is a placeholder on a reserved example
+# domain. No real account identifier, ARN, tenant or hostname appears here.
+# =============================================================================
+
+spring:
+  application:
+    name: document-service
+
+  lifecycle:
+    # Time for in-flight requests to finish before the JVM exits. Must be shorter
+    # than the Kubernetes terminationGracePeriodSeconds, or the pod is killed
+    # while it is still draining and those requests fail for real users.
+    timeout-per-shutdown-phase: 25s
+
+  # Secrets projected as files are read from this directory tree, so a rotated
+  # secret is picked up without rebuilding configuration.
+  config:
+    import: "optional:configtree:/etc/secrets/"
+
+  threads:
+    # Virtual threads for request handling. Safe on Java 25: JEP 491 removed the
+    # pinning that used to make a virtual thread block its carrier inside a
+    # synchronized block, which is what previously made this risky with JDBC
+    # connection pools. Blocking JDBC calls now unmount correctly.
+    virtual:
+      enabled: true
+
+  datasource:
+    hikari:
+      # Deliberately small. The bottleneck is PostgreSQL's connection capacity,
+      # not the application: a large pool per replica multiplied by the replica
+      # count is the usual way an autoscaled service exhausts a database.
+      maximum-pool-size: 10
+      minimum-idle: 2
+      # HikariCP takes plain milliseconds here, not Spring duration strings.
+      connection-timeout: 5000
+      # Shorter than the RDS idle timeout so the pool retires a connection before
+      # the server does and no request ever gets a half-closed socket. 25 minutes.
+      max-lifetime: 1500000
+      pool-name: document-service-pool
+
+  jpa:
+    open-in-view: false          # A request must not hold a connection while rendering.
+    hibernate:
+      ddl-auto: validate         # Flyway owns the schema. Hibernate only verifies it.
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    schemas: document
+    default-schema: document
+    # Refuses to run against a database that already has objects Flyway did not
+    # create, which is what stops a migration being applied to the wrong database.
+    baseline-on-migrate: false
+    validate-on-migrate: true
+
+  kafka:
+    producer:
+      # Durability settings. acks=all with an idempotent producer is what makes
+      # "the broker acknowledged it" mean "a majority of in-sync replicas hold
+      # it", so the outbox can safely mark a row published.
+      acks: all
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 30000
+        request.timeout.ms: 10000
+      retries: 3
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      # Offsets are committed by the container after the listener's transaction
+      # commits, so a failed listener redelivers rather than silently skipping.
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # Bounded so one slow poll cannot exceed max.poll.interval.ms and trigger
+        # a rebalance, which would redeliver everything in flight.
+        max.poll.records: 50
+    listener:
+      ack-mode: record
+      missing-topics-fatal: false
+
+server:
+  port: 8082
+  shutdown: graceful
+  error:
+    # Never expose a stack trace, an exception message or a binding error through
+    # the default error page. Errors are rendered by ApiExceptionHandler.
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+  tomcat:
+    max-http-form-post-size: 64KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Health, metrics and Prometheus scraping only. Never env, configprops,
+        # heapdump, threaddump, loggers or beans: each of those leaks
+        # configuration, credentials-in-memory or internal structure.
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      # Details only to an authenticated caller: an unauthenticated health
+      # response that names components tells an attacker what to attack.
+      show-details: when-authorized
+      show-components: when-authorized
+      probes:
+        enabled: true
+      group:
+        liveness:
+          # Liveness answers "should this pod be restarted?". It deliberately
+          # excludes the database: restarting a pod cannot fix a database outage,
+          # and doing so turns a recoverable dependency failure into a
+          # crash-loop across every replica at once.
+          include: livenessState
+        readiness:
+          # Readiness answers "should traffic be sent here?". It does include the
+          # database, because a replica that cannot reach PostgreSQL should be
+          # taken out of the load balancer while staying alive.
+          include: readinessState,db
+  metrics:
+    tags:
+      service: document-service
+  tracing:
+    sampling:
+      # Sampled at 10% by default. Full sampling on a high-volume API costs more
+      # in egress and storage than it returns in insight; raise it while
+      # investigating.
+      probability: 0.1
+  observations:
+    key-values:
+      service: document-service
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    # The interactive UI is a development convenience. It is disabled by default
+    # and enabled only by the local profile.
+    enabled: false
+
+los:
+  environment: local
+
+  security:
+    # Placeholder issuer on a reserved example domain. Replace with your own
+    # identity provider. Never commit a real Cognito user-pool URL or tenant id.
+    accepted-audiences: los-local-api
+    cors:
+      # No origin is permitted unless explicitly configured.
+      allowed-origins: ""
+
+  aws:
+    region: eu-west-1
+    # Empty in AWS: the SDK resolves the real endpoint and the pod's IAM role.
+    # Set only for LocalStack, which also switches on path-style addressing.
+    endpoint-override: ""
+
+  documents:
+    bucket: los-local-documents
+    # Short on purpose. A presigned URL is a bearer credential to write one
+    # object; the window in which a leaked URL is useful is the window in which
+    # it is valid. Long enough for a slow connection to finish a 20 MB upload.
+    presigned-url-validity: PT10M
+
+  scanner:
+    poll-interval: PT1S
+    batch-size: 20
+    abandoned-sweep-interval: PT5M
+    # -------------------------------------------------------------------
+    # THE SCANNER IS SIMULATED. It analyses no file content whatsoever.
+    # See MalwareScannerPort and docs/adr/ADR-0008 for how Amazon GuardDuty
+    # Malware Protection for S3 replaces it.
+    # -------------------------------------------------------------------
+    simulated-latency: PT0.05S
+
+  outbox:
+    poll-interval: PT1S
+    batch-size: 100
+    max-attempts: 10
+    base-backoff: PT1S
+    max-backoff: PT5M
+    send-timeout: PT10S
+
+logging:
+  # Structured JSON on stdout, using Spring Boot's built-in support rather than a
+  # third-party encoder. The container runtime collects stdout; the application
+  # never writes a log file, so a read-only root filesystem is possible.
+  structured:
+    format:
+      console: ecs
+  level:
+    root: INFO
+    com.example.los: INFO
+    # Quiet by default. SQL logging at DEBUG prints bound parameters, which for
+    # this service means applicant names and email addresses in the log.
+    org.hibernate.SQL: WARN
+    org.hibernate.orm.jdbc.bind: WARN
+    org.springframework.web: WARN
+
+---
+# =============================================================================
+# LOCAL PROFILE - Docker Compose. Synthetic data only. Not production.
+# =============================================================================
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:los}
+    # Synthetic local-only credentials. These grant access to a throwaway
+    # container and to nothing else. Production credentials never appear here.
+    username: ${POSTGRES_USER:los_local}
+    password: ${POSTGRES_PASSWORD:change-me-local-only}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
+    # PLAINTEXT locally. No AWS authentication is configured or attempted, so a
+    # developer machine never reaches for AWS credentials.
+    security:
+      protocol: PLAINTEXT
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OAUTH2_ISSUER_URI:http://localhost:8090/realms/los-local}
+
+springdoc:
+  swagger-ui:
+    enabled: true
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+
+los:
+  environment: local
+  security:
+    cors:
+      allowed-origins: "http://localhost:3000,http://localhost:5173"
+  aws:
+    # LocalStack. Setting an endpoint override also switches the S3 client and
+    # the presigner to path-style addressing, which LocalStack requires.
+    region: ${AWS_REGION:eu-west-1}
+    endpoint-override: ${AWS_ENDPOINT_URL:http://localhost:4566}
+  documents:
+    bucket: ${DOCUMENTS_BUCKET:los-local-documents}
+
+logging:
+  structured:
+    format:
+      # Human-readable locally. Structured JSON is for log aggregation, not for
+      # a developer reading a terminal.
+      console: ""
+  level:
+    com.example.los: DEBUG
+
+---
+# =============================================================================
+# AWS PROFILE - Amazon EKS. Referenced by the Helm charts.
+#
+# Contains no endpoint, account identifier or ARN: every value that differs
+# between environments is injected at deployment time.
+# =============================================================================
+spring:
+  config:
+    activate:
+      on-profile: aws
+
+  datasource:
+    url: ${LOS_DATASOURCE_URL}
+    username: ${LOS_DATASOURCE_USERNAME}
+    # Read from the Secrets Store CSI mount via the config tree import above, as
+    # los.datasource.password. Never set from an environment variable.
+    password: ${los.datasource.password:}
+
+  kafka:
+    bootstrap-servers: ${LOS_KAFKA_BOOTSTRAP_SERVERS}
+    properties:
+      # IAM authentication against Amazon MSK. No username, no password, no
+      # long-lived credential: the pod's IAM role is the credential, obtained
+      # through EKS Pod Identity.
+      security.protocol: SASL_SSL
+      sasl.mechanism: AWS_MSK_IAM
+      sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
+      sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${LOS_OAUTH2_ISSUER_URI}
+
+los:
+  environment: ${LOS_ENVIRONMENT}
+  security:
+    accepted-audiences: ${LOS_OAUTH2_AUDIENCES}
+    cors:
+      allowed-origins: ${LOS_CORS_ALLOWED_ORIGINS:}
+  aws:
+    region: ${LOS_AWS_REGION}
+    # Empty: the SDK resolves the real S3 endpoint, and the pod's IAM role
+    # through EKS Pod Identity. No access key exists anywhere.
+    endpoint-override: ""
+  documents:
+    bucket: ${LOS_DOCUMENTS_BUCKET}
+
+management:
+  cloudwatch:
+    metrics:
+      export:
+        enabled: true
+        namespace: ${LOS_ENVIRONMENT}/LoanOrigination
+        step: PT1M
+  otlp:
+    tracing:
+      endpoint: ${LOS_OTLP_ENDPOINT}
+
+springdoc:
+  swagger-ui:
+    enabled: false
