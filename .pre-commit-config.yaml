@@ -1,0 +1,106 @@
+# =============================================================================
+# Pre-commit hooks.
+#
+# THE POINT OF THE FIRST HOOK: a secret caught before the commit is a typo. A
+# secret caught by CI is already in the branch's history, and the fix is to
+# rotate the credential and then, with human approval, rewrite history --
+# invalidating every clone. The gap between those two outcomes is a few seconds
+# of hook.
+#
+# OPT-IN, and honestly so. `pre-commit install` is a local choice; a hook cannot
+# be enforced, because anyone can pass --no-verify. That is why the same checks
+# also run in CI, where they cannot be skipped. The hook exists to make the
+# fast path convenient, not to be the control.
+#
+#   pip install pre-commit
+#   pre-commit install
+#   pre-commit run --all-files      # first run, over the whole tree
+# =============================================================================
+
+# Hook repositories are pinned to tags, which pre-commit resolves and records in
+# .pre-commit-config.yaml's `rev`. `pre-commit autoupdate` moves them.
+repos:
+  # ---------------------------------------------------------------------------
+  # Secrets. First, and deliberately so: if this fails, nothing else matters.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+        name: Detect secrets before they reach a commit
+
+  # ---------------------------------------------------------------------------
+  # The cheap, boring checks that otherwise become review comments.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-yaml
+        # Helm templates are Go templates that happen to end in .yaml. They are
+        # not valid YAML until rendered, and validate-helm.sh renders and
+        # validates them properly.
+        exclude: ^deploy/helm/.*/templates/
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: detect-private-key
+      - id: detect-aws-credentials
+        args: [--allow-missing-credentials]
+      - id: no-commit-to-branch
+        # main is protected in CI too; this catches the local slip earlier.
+        args: [--branch, main]
+
+  # ---------------------------------------------------------------------------
+  # Terraform formatting only.
+  #
+  # NOT validate, tflint or checkov: those need a provider download and take
+  # long enough that people start using --no-verify, which loses the secret scan
+  # along with them. They run in CI and through scripts/validate-terraform.sh.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/antonbabenko/pre-commit-terraform
+    rev: v1.99.0
+    hooks:
+      - id: terraform_fmt
+
+  # ---------------------------------------------------------------------------
+  # Shell scripts. Every script in scripts/ gates something.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+
+  # ---------------------------------------------------------------------------
+  # Local hooks: things that need this repository's own toolchain.
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: spotless
+        name: Java formatting (Spotless)
+        entry: ./mvnw -B -ntp -q spotless:apply
+        language: system
+        files: \.java$
+        pass_filenames: false
+
+      - id: no-terraform-state
+        name: Refuse Terraform state and plan files
+        # These carry resource attributes and, for some resources, secret
+        # values. .gitignore already excludes them; this catches a `git add -f`.
+        entry: |
+          bash -c 'echo "Terraform state or plan files must never be committed. They contain resource attributes and can contain secrets."; exit 1'
+        language: system
+        files: '\.tfstate$|\.tfstate\..*$|\.tfplan$|\.tfplan\..*$'
+
+      - id: no-kubeconfig
+        name: Refuse kubeconfig files
+        entry: |
+          bash -c 'echo "A kubeconfig grants cluster access and must never be committed."; exit 1'
+        language: system
+        files: '(^|/)(kubeconfig|\.kube/config)$'

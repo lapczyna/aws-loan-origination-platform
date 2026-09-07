@@ -1,0 +1,391 @@
+# =============================================================================
+# Pull request checks.
+#
+# THIS WORKFLOW HAS NEVER RUN. The repository has no remote, so GitHub Actions
+# has never executed a single job here. Every check it performs was run locally
+# through the equivalent Makefile target, and the workflow is lint-clean under
+# actionlint 1.7.7 -- but "the YAML is valid and the same commands pass on a
+# laptop" is not the same claim as "this pipeline is green", and it is not made.
+#
+# WHAT THIS WORKFLOW DELIBERATELY DOES NOT DO
+# -------------------------------------------
+# It does not push an image, touch a cluster, plan or apply Terraform, or hold
+# any AWS credential. A pull request from a fork would otherwise be a path to
+# the account. Publishing and deploying live in separate workflows that are
+# manually triggered and environment-gated.
+#
+# EVERY THIRD-PARTY ACTION IS PINNED TO A COMMIT SHA, with the tag in a trailing
+# comment. A tag is a movable pointer: whoever controls the action's repository
+# can repoint v4 at new code, and that code runs with this job's token. A SHA
+# cannot be repointed. The comment is there so a human can still read the
+# version, and Dependabot updates both together.
+# =============================================================================
+
+name: Pull request
+
+on:
+  pull_request:
+    branches: [main]
+  # Also on pushes to main, so the branch's own state is checked rather than
+  # only the diff that was proposed against it.
+  push:
+    branches: [main]
+
+# Read-only by default. Any job needing more asks for it explicitly, and only
+# the scopes it needs.
+permissions:
+  contents: read
+
+# A new push cancels the previous run for the same ref. Reviewing the results of
+# a commit that has already been superseded wastes both runner time and the
+# reviewer's.
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JAVA_VERSION: "25"
+  JAVA_DISTRIBUTION: liberica
+  # Pinned, and matching the versions the checks were run with locally.
+  TERRAFORM_VERSION: 1.15.6
+  TFLINT_VERSION: v0.64.0
+  CHECKOV_VERSION: 3.3.8
+  HELM_VERSION: v4.2.4
+  KUBECONFORM_VERSION: 0.8.0
+  GITLEAKS_VERSION: 8.30.1
+  ACTIONLINT_VERSION: 1.7.7
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build, unit tests, integration tests, ArchUnit rules and formatting.
+  #
+  # The integration tests are Testcontainers-based and start real PostgreSQL,
+  # Kafka and LocalStack containers. They are NOT skipped in CI: a suite that
+  # silently degrades to unit tests on the one machine nobody watches is worse
+  # than no suite, because it reports green for something it did not check.
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Set up JDK
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      - name: Check formatting
+        run: ./mvnw -B -ntp spotless:check
+
+      - name: Build, test and verify
+        # Includes the Testcontainers integration tests and the ArchUnit rules.
+        run: ./mvnw -B -ntp clean verify
+
+      - name: Publish test reports
+        # Runs even when the build failed -- that is precisely when the reports
+        # are wanted.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Publish coverage
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: coverage
+          path: "**/target/site/jacoco/**"
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # Secret scanning, over the FULL history.
+  #
+  # fetch-depth: 0 is the entire point. A secret removed in a later commit is
+  # still in the repository, still reachable, and still valid until it is
+  # rotated. Scanning only the working tree finds nothing and proves nothing.
+  #
+  # The binary is downloaded and CHECKSUM-VERIFIED rather than run through a
+  # marketplace action: it keeps the version identical to the one used locally,
+  # and it needs no licence key.
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+
+      - name: Install gitleaks
+        env:
+          # Verified against the published release archive.
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          url="https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL "${url}" -o gitleaks.tar.gz
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+
+      - name: Scan the working tree
+        run: gitleaks detect --no-git --source . --config .gitleaks.toml --redact --verbose
+
+      - name: Scan the full history
+        run: gitleaks detect --source . --config .gitleaks.toml --redact --verbose
+
+  # ---------------------------------------------------------------------------
+  # Dependency review.
+  #
+  # Pull requests only: the action compares the base and head of a PR, so there
+  # is nothing for it to diff on a push to main.
+  # ---------------------------------------------------------------------------
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: github.event_name == 'pull_request'
+
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: actions/dependency-review-action@2031cfc080254a8a887f58cffee85186f0e49e48 # v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+          # A copyleft licence is not a vulnerability, but arriving in a
+          # dependency unnoticed is a legal problem rather than a technical one,
+          # so it is surfaced at review time.
+          deny-licenses: AGPL-3.0, GPL-3.0
+
+  # ---------------------------------------------------------------------------
+  # Container images: BUILT, SCANNED, AND NEVER PUSHED.
+  #
+  # push: false is not a default being relied upon; it is stated. This job holds
+  # no registry credential at all, so a change that tried to push would fail for
+  # want of a credential rather than succeed quietly.
+  # ---------------------------------------------------------------------------
+  images:
+    name: Build and scan images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: build
+
+    permissions:
+      contents: read
+      # Only so Trivy findings land in the Security tab.
+      security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - application-service
+          - workflow-service
+          - document-service
+          - audit-service
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # No setup-java and no separate package step: the Dockerfile runs its own
+      # Maven build in the builder stage, deliberately, so the image does not
+      # depend on an artifact produced by a differently configured host.
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build the image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/docker/service.Dockerfile
+          build-args: |
+            SERVICE_NAME=${{ matrix.service }}
+            GIT_SHA=${{ github.sha }}
+          # Never pushed from a pull request. Publishing is a separate,
+          # manually triggered workflow.
+          push: false
+          load: true
+          tags: ${{ matrix.service }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.service }}:${{ github.sha }}
+          format: sarif
+          output: trivy-${{ matrix.service }}.sarif
+          severity: CRITICAL,HIGH
+          # The scan reports; it does not fail the build here. A base-image CVE
+          # with no fix available would otherwise block every unrelated pull
+          # request, which trains people to bypass the check. Findings are
+          # triaged in the Security tab, and the publish workflow DOES fail on
+          # them -- shipping is the point at which it must be a hard stop.
+          exit-code: "0"
+
+      - name: Upload the scan to the Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d # v3
+        with:
+          sarif_file: trivy-${{ matrix.service }}.sarif
+          category: trivy-${{ matrix.service }}
+
+      - name: Generate an SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ matrix.service }}:${{ github.sha }}
+          format: cyclonedx-json
+          artifact-name: sbom-${{ matrix.service }}.cyclonedx.json
+          output-file: sbom-${{ matrix.service }}.cyclonedx.json
+
+  # ---------------------------------------------------------------------------
+  # Terraform: format, validate, tflint, checkov.
+  #
+  # NO CREDENTIALS, AND NO PLAN. `terraform init -backend=false` configures no
+  # backend, so nothing contacts S3 or DynamoDB and no state is read. A plan
+  # needs credentials and live state, and belongs in the separate, OIDC-
+  # authenticated workflow that never applies.
+  # ---------------------------------------------------------------------------
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          # The wrapper rewrites stdout to collect it into step outputs, which
+          # mangles the output the script below inspects.
+          terraform_wrapper: false
+
+      - uses: terraform-linters/setup-tflint@90f302c255ef959cbfb4bd10581afecdb7ece3e6 # v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install checkov
+        # Pinned to the exact version the triage was performed with. A newer
+        # checkov may add checks, and a scan that starts failing because the
+        # scanner changed is a decision to make deliberately, not a surprise on
+        # an unrelated pull request.
+        run: pip install --no-cache-dir "checkov==${CHECKOV_VERSION}"
+
+      - name: Validate and scan
+        # The same script that runs locally, so the two cannot drift.
+        run: ./scripts/validate-terraform.sh
+
+  # ---------------------------------------------------------------------------
+  # Helm: lint, render, and validate the rendered manifests against the
+  # Kubernetes schemas. Never against a cluster -- no kubeconfig exists here.
+  # ---------------------------------------------------------------------------
+  helm:
+    name: Helm and Kubernetes manifests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Install kubeconform
+        env:
+          KUBECONFORM_SHA256: 9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883
+        run: |
+          set -euo pipefail
+          url="https://github.com/yannh/kubeconform/releases/download/v${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          curl -fsSL "${url}" -o kubeconform.tar.gz
+          echo "${KUBECONFORM_SHA256}  kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf kubeconform.tar.gz kubeconform
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+
+      - name: Lint, render and validate
+        run: ./scripts/validate-helm.sh
+
+  # ---------------------------------------------------------------------------
+  # The workflows check themselves.
+  #
+  # A workflow is code that runs with a token scoped to this repository, and it
+  # is the one kind of code with no compiler and no test suite. actionlint is
+  # the closest thing available: it catches an undefined `needs`, a bad context
+  # expression, a shell error inside a `run:` block, and -- through shellcheck
+  # -- the quoting mistakes that turn an input into a command.
+  # ---------------------------------------------------------------------------
+  workflows:
+    name: Lint the workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Install actionlint
+        env:
+          ACTIONLINT_SHA256: 023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757
+        run: |
+          set -euo pipefail
+          url="https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL "${url}" -o actionlint.tar.gz
+          echo "${ACTIONLINT_SHA256}  actionlint.tar.gz" | sha256sum -c -
+          tar -xzf actionlint.tar.gz actionlint
+          sudo install -m 0755 actionlint /usr/local/bin/actionlint
+
+      - name: Lint
+        run: actionlint -color
+
+      - name: Check every third-party action is pinned to a SHA
+        # actionlint does not enforce this, and it is the property that matters
+        # most here. The check lives in a script so it can be run and tested
+        # outside CI rather than only existing as YAML nobody can exercise.
+        run: ./scripts/check-action-pins.sh
+
+  # ---------------------------------------------------------------------------
+  # OpenAPI.
+  #
+  # The document does not exist yet -- it is Phase 12 work -- so this job checks
+  # for it and says so rather than passing silently. It will fail once the file
+  # lands and is invalid, which is the behaviour that matters.
+  # ---------------------------------------------------------------------------
+  openapi:
+    name: OpenAPI document
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: Lint the OpenAPI document
+        run: |
+          set -euo pipefail
+          if [ ! -f docs/api/openapi.yaml ]; then
+            echo "docs/api/openapi.yaml does not exist yet (Phase 12)."
+            echo "Reported rather than passed silently, so the gap stays visible."
+            exit 0
+          fi
+          npx --yes @redocly/cli@1.34.3 lint docs/api/openapi.yaml

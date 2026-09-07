@@ -1,0 +1,187 @@
+# =============================================================================
+# Publish container images to Amazon ECR.
+#
+# THIS WORKFLOW HAS NEVER BEEN EXECUTED. No image has been pushed to any
+# registry, no OIDC role exists, and the account identifier below is twelve
+# zeroes. It describes how publishing would work; it has not published anything.
+#
+# WHY THERE IS NO LONG-LIVED AWS KEY HERE
+# ---------------------------------------
+# The job authenticates with GitHub's OIDC token, exchanged for a short-lived
+# role session. A stored AWS access key would be a permanent credential sitting
+# in repository settings, readable by every workflow, valid until somebody
+# remembers to rotate it, and impossible to scope to a branch. The OIDC trust
+# policy can require the exact repository AND the exact ref, so a fork or a
+# feature branch cannot assume the role even with a valid token.
+#
+# NEVER TRIGGERED BY A PUSH. Publishing is either a tagged release or a
+# deliberate manual act. "Merged to main" is not a decision to ship.
+# =============================================================================
+
+name: Publish images
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type PUBLISH to confirm. Anything else stops the run.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Never two publishes of the same ref at once, and never cancelled halfway: a
+# cancelled push can leave a manifest referring to layers that are still
+# uploading.
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  JAVA_VERSION: "25"
+  JAVA_DISTRIBUTION: liberica
+  AWS_REGION: eu-west-1
+  # PLACEHOLDER. Twelve zeroes, not an account.
+  ECR_REGISTRY: 000000000000.dkr.ecr.eu-west-1.amazonaws.com
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # A hard stop before anything else runs.
+  #
+  # A dropdown that says "publish" is one mis-click. Typing the word is a
+  # deliberate act, and it happens BEFORE the job that holds the credential.
+  # ---------------------------------------------------------------------------
+  confirm:
+    name: Confirm intent
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check the confirmation
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          CONFIRMATION: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRMATION}" != "PUBLISH" ]; then
+            echo "Confirmation was not the literal word PUBLISH. Nothing was published."
+            exit 1
+          fi
+          echo "Confirmed."
+
+  publish:
+    name: Build, scan and push
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: confirm
+
+    # A protected environment. Required reviewers and any wait timer are
+    # configured on the environment itself, in repository settings, so the gate
+    # cannot be removed by editing this file in a pull request.
+    environment: image-publish
+
+    permissions:
+      contents: read
+      # The OIDC token. This is the entire reason no AWS key is stored.
+      id-token: write
+
+    strategy:
+      fail-fast: true
+      matrix:
+        service:
+          - application-service
+          - workflow-service
+          - document-service
+          - audit-service
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build the image
+        id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/docker/service.Dockerfile
+          build-args: |
+            SERVICE_NAME=${{ matrix.service }}
+            VERSION=${{ github.ref_name }}
+            GIT_SHA=${{ github.sha }}
+          # Built and loaded locally FIRST, so it can be scanned before any
+          # credential is acquired. Scanning after a push is scanning something
+          # that is already available to pull.
+          push: false
+          load: true
+          tags: ${{ matrix.service }}:${{ github.sha }}
+          provenance: false
+
+      - name: Scan the image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ matrix.service }}:${{ github.sha }}
+          format: table
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          # A HARD STOP, unlike the pull-request scan. On a pull request a
+          # base-image CVE with no fix available should not block unrelated
+          # work; at the point of shipping it must. ignore-unfixed keeps that
+          # from being unactionable: a finding here has a fix available.
+          exit-code: "1"
+
+      - name: Generate an SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          image: ${{ matrix.service }}:${{ github.sha }}
+          format: cyclonedx-json
+          artifact-name: sbom-${{ matrix.service }}.cyclonedx.json
+          output-file: sbom-${{ matrix.service }}.cyclonedx.json
+
+      # -- Only now is a credential acquired, and only after the image passed. --
+
+      - name: Assume the publish role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          # PLACEHOLDER ARN. The trust policy on the real role must restrict
+          # both the repository and the ref; a repository-only condition lets
+          # any branch in this repository publish.
+          role-to-assume: arn:aws:iam::000000000000:role/github-actions-ecr-publish
+          role-session-name: publish-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2
+
+      - name: Push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/docker/service.Dockerfile
+          build-args: |
+            SERVICE_NAME=${{ matrix.service }}
+            VERSION=${{ github.ref_name }}
+            GIT_SHA=${{ github.sha }}
+          push: true
+          # The commit SHA is the tag that matters: it is immutable and it
+          # identifies exactly what was built. The release tag is a convenience
+          # for humans. There is deliberately NO `latest` -- a mutable tag makes
+          # "which version is running?" unanswerable, and the ECR repositories
+          # are configured for immutable tags anyway, so a second push of the
+          # same tag is refused.
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.ref_name }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Record the digest
+        # The digest, not the tag, is what the deploy workflow consumes. A tag
+        # can be moved; a digest cannot.
+        run: |
+          set -euo pipefail
+          echo "Published ${{ matrix.service }}"
+          echo "digest: ${{ steps.build.outputs.digest }}"

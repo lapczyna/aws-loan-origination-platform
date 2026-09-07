@@ -1,0 +1,132 @@
+# =============================================================================
+# Terraform plan.
+#
+# THIS WORKFLOW HAS NEVER BEEN EXECUTED, and no plan has ever been produced
+# against AWS. No remote state exists, no OIDC role exists, and the account
+# identifier below is twelve zeroes.
+#
+# IT NEVER APPLIES. There is no `terraform apply` in this file, and the role it
+# assumes is intended to be read-only. Those are two independent controls, on
+# purpose: the absence of a command is a property of a file anyone can edit, and
+# the permissions of the role are not.
+#
+# WHY A PLAN NEEDS TO BE TREATED CAREFULLY AT ALL
+# -----------------------------------------------
+# A plan is not harmless. It reads live state, and Terraform state contains
+# resource attributes and, for some resources, secret values. That is why:
+#
+#   * the plan file is NEVER uploaded as an artifact -- artifacts are
+#     downloadable by anyone with read access to the repository;
+#   * `-no-color` output is posted to the pull request only when it is short,
+#     and secrets are not echoed;
+#   * the job runs in a protected environment, so a fork's pull request cannot
+#     reach the role at all.
+# =============================================================================
+
+name: Terraform plan
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Which environment to plan'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod-example
+
+permissions:
+  contents: read
+
+concurrency:
+  # One plan per environment. Two concurrent plans against the same state race
+  # on the state lock and one of them fails after doing all the work.
+  group: terraform-plan-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  TERRAFORM_VERSION: 1.15.6
+  AWS_REGION: eu-west-1
+
+jobs:
+  plan:
+    name: Plan ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # Protected. Reviewers are configured on the environment in repository
+    # settings, so the gate is not editable from a pull request.
+    environment: terraform-plan-${{ inputs.environment }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Assume the read-only plan role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          # PLACEHOLDER ARN. The real role should carry ReadOnlyAccess plus only
+          # the state-bucket and lock-table permissions a plan needs. A plan role
+          # that can write is an apply role that has not been used yet.
+          role-to-assume: arn:aws:iam::000000000000:role/github-actions-terraform-plan
+          role-session-name: plan-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Initialise
+        working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
+        # Backend configuration is supplied here rather than committed: a
+        # backend block naming the real bucket would publish that bucket and the
+        # account it lives in. See docs/operations/terraform-state-bootstrap.md.
+        env:
+          STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+          STATE_LOCK_TABLE: ${{ vars.TF_STATE_LOCK_TABLE }}
+        run: |
+          set -euo pipefail
+          terraform init \
+            -backend-config="bucket=${STATE_BUCKET}" \
+            -backend-config="key=${{ inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="dynamodb_table=${STATE_LOCK_TABLE}" \
+            -backend-config="encrypt=true"
+
+      - name: Plan
+        id: plan
+        working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          # -lock-timeout so a stale lock reports rather than hanging until the
+          # job timeout, which looks identical to a hung provider.
+          # -detailed-exitcode: 0 no changes, 2 changes present, 1 error.
+          set +e
+          terraform plan -no-color -input=false -lock-timeout=5m -detailed-exitcode -out=tfplan
+          code=$?
+          set -e
+          case "${code}" in
+            0) echo "No changes." ;;
+            2) echo "Changes are pending. Review them above." ;;
+            *) echo "Plan failed."; exit "${code}" ;;
+          esac
+
+      - name: Destroy the plan file
+        # ALWAYS, including on failure. A plan file contains resource attributes
+        # and can contain secret values; leaving one on the runner's disk for
+        # the rest of the job is avoidable, and uploading one as an artifact
+        # would publish it to everyone with read access.
+        if: always()
+        working-directory: infrastructure/terraform/environments/${{ inputs.environment }}
+        run: rm -f tfplan
+
+      - name: State the boundary
+        if: always()
+        run: |
+          echo "This workflow plans only. It contains no 'terraform apply'."
+          echo "Applying is a separate, manually confirmed, environment-gated workflow."

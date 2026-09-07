@@ -1,0 +1,263 @@
+# =============================================================================
+# Deploy to EKS.
+#
+# THIS WORKFLOW HAS NEVER BEEN EXECUTED. Nothing has been deployed to any
+# cluster. No EKS cluster exists, no OIDC role exists, and every identifier
+# below is a placeholder.
+#
+# THERE IS NO AUTOMATIC PATH FROM A MERGE TO A DEPLOYMENT, and that is the
+# central design decision here. A merge to main means the change was reviewed;
+# it does not mean somebody is available to watch it roll out, that the change
+# window is open, or that anyone intended to ship today. Continuous deployment
+# is a fine choice for some systems. For a platform that makes lending decisions
+# about real people, the deploy is a deliberate act with a name attached to it.
+#
+# FIVE INDEPENDENT GATES, so that no single mistake deploys anything:
+#
+#   1. workflow_dispatch only -- no push, no schedule, no release trigger.
+#   2. A literal DEPLOY typed into a text field. Not a dropdown, not a checkbox.
+#   3. A protected environment with required reviewers, configured in repository
+#      settings rather than in this file, so it cannot be removed by a pull
+#      request that edits this YAML.
+#   4. An IMMUTABLE IMAGE DIGEST per service as a required input. Not a tag.
+#      Four are required rather than one, because four separate images are
+#      deployed and a single "version" would be a fiction that hides which
+#      service actually changed.
+#   5. A Helm dry-run against the live cluster before the real upgrade.
+#
+# Gates 1 and 2 live in this file and are therefore editable by anyone who can
+# open a pull request. Gate 3 is not. That asymmetry is intentional: the gate
+# that cannot be edited from inside the repository is the one that matters.
+# =============================================================================
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+      application_service_digest:
+        description: 'application-service image digest, sha256:... (NOT a tag)'
+        required: true
+        type: string
+      workflow_service_digest:
+        description: 'workflow-service image digest, sha256:... (NOT a tag)'
+        required: true
+        type: string
+      document_service_digest:
+        description: 'document-service image digest, sha256:... (NOT a tag)'
+        required: true
+        type: string
+      audit_service_digest:
+        description: 'audit-service image digest, sha256:... (NOT a tag)'
+        required: true
+        type: string
+      confirm:
+        description: 'Type DEPLOY to confirm. Anything else stops the run.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two deployments to the same environment at once, and NEVER cancelled
+  # in flight: interrupting a Helm upgrade halfway leaves the release in a
+  # pending state that the next upgrade refuses to touch.
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  HELM_VERSION: v4.2.4
+  AWS_REGION: eu-west-1
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Gates that cost nothing, run first, and hold no credential.
+  # ---------------------------------------------------------------------------
+  confirm:
+    name: Confirm intent
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check the confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRMATION}" != "DEPLOY" ]; then
+            echo "Confirmation was not the literal word DEPLOY. Nothing was deployed."
+            exit 1
+          fi
+          echo "Confirmed."
+
+      - name: Check every digest is a digest
+        env:
+          APPLICATION_DIGEST: ${{ inputs.application_service_digest }}
+          WORKFLOW_DIGEST: ${{ inputs.workflow_service_digest }}
+          DOCUMENT_DIGEST: ${{ inputs.document_service_digest }}
+          AUDIT_DIGEST: ${{ inputs.audit_service_digest }}
+        run: |
+          set -euo pipefail
+          # A tag would be accepted silently by Helm and would deploy whatever
+          # that tag points at NOW, which is not necessarily what was reviewed.
+          failed=0
+          check() {
+            if printf '%s' "$2" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+              echo "  $1: ok"
+            else
+              echo "  $1: NOT a digest. Expected sha256: followed by 64 hex characters."
+              failed=1
+            fi
+          }
+          check application-service "${APPLICATION_DIGEST}"
+          check workflow-service    "${WORKFLOW_DIGEST}"
+          check document-service    "${DOCUMENT_DIGEST}"
+          check audit-service       "${AUDIT_DIGEST}"
+          if [ "${failed}" -ne 0 ]; then
+            echo ""
+            echo "A tag is not acceptable here: it can be repointed after review,"
+            echo "so what deploys would not be what was scanned and approved."
+            exit 1
+          fi
+          echo "All four digests accepted."
+
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: confirm
+
+    # THE GATE THAT MATTERS. Required reviewers, wait timers and the branches
+    # allowed to deploy are configured on the environment in repository
+    # settings, not here, so editing this file cannot remove them.
+    environment:
+      name: ${{ inputs.environment }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
+        with:
+          # PLACEHOLDER ARN. The real role's trust policy must pin the
+          # repository, the ref, AND the environment, so that a run against a
+          # different environment cannot assume this one's role.
+          role-to-assume: arn:aws:iam::000000000000:role/github-actions-deploy-${{ inputs.environment }}
+          role-session-name: deploy-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Fetch cluster credentials
+        env:
+          CLUSTER_NAME: ${{ vars.EKS_CLUSTER_NAME }}
+        run: |
+          set -euo pipefail
+          aws eks update-kubeconfig --name "${CLUSTER_NAME}" --region "${AWS_REGION}"
+
+      - name: Assemble the Helm arguments
+        id: args
+        env:
+          APPLICATION_DIGEST: ${{ inputs.application_service_digest }}
+          WORKFLOW_DIGEST: ${{ inputs.workflow_service_digest }}
+          DOCUMENT_DIGEST: ${{ inputs.document_service_digest }}
+          AUDIT_DIGEST: ${{ inputs.audit_service_digest }}
+        # Built once and reused by the render, the dry run and the upgrade, so
+        # the three cannot drift apart -- a dry run that validated different
+        # values from the ones deployed would be worse than no dry run at all.
+        run: |
+          set -euo pipefail
+          {
+            echo 'values<<HELM_ARGS_EOF'
+            echo "--set-string services.application-service.digest=${APPLICATION_DIGEST}"
+            echo "--set-string services.workflow-service.digest=${WORKFLOW_DIGEST}"
+            echo "--set-string services.document-service.digest=${DOCUMENT_DIGEST}"
+            echo "--set-string services.audit-service.digest=${AUDIT_DIGEST}"
+            echo 'HELM_ARGS_EOF'
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Render and validate before touching anything
+        env:
+          HELM_DIGEST_ARGS: ${{ steps.args.outputs.values }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          helm template loan-origination-platform \
+            deploy/helm/loan-origination-platform \
+            --values "deploy/helm/loan-origination-platform/environments/values-${{ inputs.environment }}.yaml" \
+            ${HELM_DIGEST_ARGS} \
+            > rendered.yaml
+          echo "Rendered $(grep -c '^kind:' rendered.yaml) resources."
+
+      - name: Dry run against the live cluster
+        env:
+          HELM_DIGEST_ARGS: ${{ steps.args.outputs.values }}
+        # --dry-run=server, not client. A client dry run only re-renders the
+        # templates, which the previous step already did. A SERVER dry run sends
+        # the manifests to the API server, so admission controllers, quotas,
+        # policies and CRD validation all get their say before anything is
+        # actually changed.
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          helm upgrade --install loan-origination-platform \
+            deploy/helm/loan-origination-platform \
+            --namespace loan-origination \
+            --values "deploy/helm/loan-origination-platform/environments/values-${{ inputs.environment }}.yaml" \
+            ${HELM_DIGEST_ARGS} \
+            --dry-run=server
+
+      - name: Deploy
+        env:
+          HELM_DIGEST_ARGS: ${{ steps.args.outputs.values }}
+        # --atomic rolls back automatically if the release fails to become
+        # ready. Without it a failed upgrade leaves a half-updated deployment
+        # serving traffic, which is worse than either the old or the new one.
+        #
+        # --wait-for-jobs and a timeout shorter than the job's, so a stuck
+        # rollout is reported by Helm with the reason rather than killed by the
+        # runner with no explanation.
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          helm upgrade --install loan-origination-platform \
+            deploy/helm/loan-origination-platform \
+            --namespace loan-origination \
+            --create-namespace \
+            --values "deploy/helm/loan-origination-platform/environments/values-${{ inputs.environment }}.yaml" \
+            ${HELM_DIGEST_ARGS} \
+            --atomic \
+            --wait \
+            --wait-for-jobs \
+            --timeout 15m
+
+      - name: Smoke check
+        run: |
+          set -euo pipefail
+          # Readiness as the cluster sees it, not as a health endpoint reports
+          # it to itself.
+          kubectl -n loan-origination rollout status deployment --timeout=5m
+          kubectl -n loan-origination get pods -o wide
+
+      - name: Report what is running
+        if: always()
+        run: |
+          set -euo pipefail
+          helm -n loan-origination history loan-origination-platform || true
+          echo ""
+          echo "Rolling back is 'helm -n loan-origination rollback loan-origination-platform <revision>'."
+          echo "See docs/operations/runbooks/eks-rollback.md."

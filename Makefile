@@ -133,9 +133,17 @@ openapi-validate: ## Validate the OpenAPI 3.1 document
 secret-scan: ## Scan the working tree and the full Git history for secrets
 	./scripts/secret-scan.sh
 
+.PHONY: ci-validate
+ci-validate: ## Lint the GitHub workflows and check every action is SHA-pinned
+	@./scripts/check-action-pins.sh
+	@command -v actionlint >/dev/null 2>&1 && actionlint || echo "    actionlint is not installed; SKIPPED (CI always runs it)."
+
 .PHONY: release-check
 release-check: ## Run every check required before considering public release
-	$(MAKE) format-check verify tf-validate helm-validate openapi-validate secret-scan
+	$(MAKE) format-check verify tf-validate helm-validate openapi-validate ci-validate secret-scan
+	@echo ""
+	@echo "==> Documentation links"
+	@./scripts/check-doc-links.sh
 	@echo ""
 	@echo "Automated checks passed. A HUMAN SECURITY REVIEW is still required:"
 	@echo "see docs/public-release-checklist.md."

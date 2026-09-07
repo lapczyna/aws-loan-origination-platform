@@ -1,0 +1,41 @@
+# =============================================================================
+# CODEOWNERS -- EXAMPLE ONLY.
+#
+# Named .example on purpose. An active CODEOWNERS file naming real accounts or
+# teams would publish an organisation's structure and the handles of the people
+# in it. Copy it to .github/CODEOWNERS and substitute real owners when this
+# repository has real owners.
+#
+# CODEOWNERS only has teeth when the branch protection rule for main requires
+# review from code owners. Without that setting it is documentation.
+# =============================================================================
+
+# Default owner for anything not matched below.
+*                                   @example-org/platform-engineering
+
+# --- The parts where a mistake is expensive ---------------------------------
+
+# Infrastructure. A change here can cost money continuously or open a network
+# path, and neither is visible in a diff without knowing what to look for.
+/infrastructure/                    @example-org/platform-engineering @example-org/cloud-security
+
+# Anything that can deploy, publish, or hold a credential. A pull request that
+# edits a workflow is a pull request that can change what runs with the
+# repository's token.
+/.github/workflows/                 @example-org/platform-engineering @example-org/cloud-security
+
+# Scanner configuration. Adding a suppression is how a real finding gets
+# silenced, so it is reviewed by the people who would have to answer for it.
+/.checkov.yaml                      @example-org/cloud-security
+/.gitleaks.toml                     @example-org/cloud-security
+
+# The audit trail. Its append-only guarantees and hash chain are the evidence
+# the platform produces about itself; weakening them is not a routine change.
+/services/audit-service/            @example-org/platform-engineering @example-org/compliance
+
+# Database migrations. Irreversible in production by default.
+**/db/migration/                    @example-org/platform-engineering @example-org/data-engineering
+
+# Security documentation and policy.
+/SECURITY.md                        @example-org/cloud-security
+/docs/security/                     @example-org/cloud-security

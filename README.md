@@ -38,15 +38,41 @@ deletes an AWS resource.
 
 ## Documentation
 
+Entries in *italics* do not exist yet; they are listed because files in the tree
+already link to them, and `scripts/check-doc-links.sh` reports exactly which.
+
 | Document | What it covers |
 |---|---|
-| [`PROGRESS.md`](PROGRESS.md) | Implementation status, verified commands, limitations |
-| `docs/architecture/` | System context, containers, sequences, AWS topology |
-| `docs/adr/` | Architecture decision records |
-| `docs/api/openapi.yaml` | The OpenAPI 3.1 contract |
-| `docs/operations/` | Runbooks and cost drivers |
-| `docs/security/` | STRIDE threat model, data classification |
-| `docs/public-release-checklist.md` | What must happen before this repository is made public |
+| [`PROGRESS.md`](PROGRESS.md) | Implementation status, verified commands, limitations — **the honest record** |
+| [`SECURITY.md`](SECURITY.md) | Reporting a vulnerability, what protects the data, what is not scanned |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to work on this, and the rules that are not negotiable |
+| [`docs/security/threat-model.md`](docs/security/threat-model.md) | STRIDE, with residual risks stated |
+| [`docs/security/data-classification.md`](docs/security/data-classification.md) | What is held, how long, and the honest problem with erasure |
+| [`docs/security/incident-response.md`](docs/security/incident-response.md) | Severity, playbooks, what is available to investigate with |
+| [`docs/security/scanning.md`](docs/security/scanning.md) | Every scanner result and every suppression's justification |
+| [`docs/operations/runbooks/secret-rotation.md`](docs/operations/runbooks/secret-rotation.md) | Rotate first, then consider history |
+| [`infrastructure/terraform/README.md`](infrastructure/terraform/README.md) | Module inventory, cost warnings, HA vs DR |
+| *`docs/adr/`* | Architecture decision records — Phase 12 |
+| *`docs/architecture/`* | Context, containers, sequences, AWS topology — Phase 12 |
+| *`docs/api/openapi.yaml`* | The OpenAPI 3.1 contract — Phase 12 |
+| *`docs/operations/cost.md`* | Cost drivers — Phase 12 |
+| *`docs/public-release-checklist.md`* | What must happen before this is made public — Phase 12 |
+
+## Continuous integration
+
+Four workflows in [`.github/workflows/`](.github/workflows/), **none of which
+has ever executed** — the repository has no remote. Every third-party action is
+pinned to a commit SHA, enforced by
+[`scripts/check-action-pins.sh`](scripts/check-action-pins.sh).
+
+| Workflow | Trigger | What it will not do |
+|---|---|---|
+| `pull-request.yml` | PR, push to main | Hold an AWS credential, push an image, plan Terraform |
+| `publish-images.yml` | release, or manual + literal `PUBLISH` | Run on a push |
+| `terraform-plan.yml` | manual only | Apply — the file contains no `terraform apply` |
+| `deploy.yml` | manual only | Deploy without a typed `DEPLOY`, a protected environment, and an immutable digest per service |
+
+There is deliberately **no path from a merge to a deployment**.
 
 ---
 

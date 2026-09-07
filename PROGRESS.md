@@ -23,6 +23,9 @@ Last updated: 2026-09-07
 | kubectl | 1.29.2 (client only; never connected to a cluster) |
 | gitleaks / kubeconform / tflint | 8.30.1 / 0.8.0 / 0.64.0, downloaded to a scratch directory outside the repository |
 | checkov | 3.3.8 |
+| actionlint | 1.7.7, downloaded to the scratch directory |
+| pre-commit | 3.8.0 |
+| GNU make | **not installed** — see below |
 
 ---
 
@@ -41,7 +44,7 @@ Last updated: 2026-09-07
 | 8 | Docker and Docker Compose | Done |
 | 9 | Kubernetes and Helm | Done |
 | 10 | Terraform | Done |
-| 11 | CI/CD and security scanning | **Not started** |
+| 11 | CI/CD and security scanning | Done |
 | 12 | End-to-end suite, documentation, public-release review | **Not started** |
 
 ---
@@ -55,8 +58,16 @@ Every command below was executed on this machine and its output observed.
 scripts/validate-terraform.sh  # fmt + validate + tflint + checkov, exit 0
 scripts/validate-helm.sh       # helm lint + template + kubeconform, exit 0
 scripts/secret-scan.sh         # gitleaks, working tree and full history
-make local-up && make local-smoke-test && make local-down
+docker compose -f deploy/compose/docker-compose.yml up -d
+scripts/local-smoke-test.sh
+docker compose -f deploy/compose/docker-compose.yml down
+scripts/check-action-pins.sh  # every GitHub Action pinned to a commit SHA
+actionlint                     # all four workflows lint-clean
 ```
+
+**GNU make is not installed on this machine.** The Makefile is a convenience
+wrapper over exactly the commands above, and its targets have not themselves
+been executed here. The underlying commands have.
 
 ### Test totals
 
@@ -210,7 +221,7 @@ discipline.
   issuer. `S3_SKIP_SIGNATURE_VALIDATION=0` is set explicitly — LocalStack
   skips presigned-signature validation by default, which made two tests vacuous
   until it was found.
-- `make local-smoke-test` drives the whole vertical slice and was run: an
+- `scripts/local-smoke-test.sh` drives the whole vertical slice and was run: an
   application reached `APPROVED`, 16 audit records were written with an intact
   chain, every outbox drained, and no personal data appeared in any log.
 
@@ -261,20 +272,90 @@ copy rather than assumed. See [`docs/security/scanning.md`](docs/security/scanni
 
 ---
 
+### Phase 11 — CI/CD and security scanning
+
+Four workflows, **none of which has ever executed.** The repository has no
+remote, so GitHub Actions has never run a job. What can be verified locally was:
+all four are lint-clean under actionlint 1.7.7, every third-party action is
+pinned to a commit SHA, and the checks the pull-request workflow runs are the
+same scripts that were run by hand.
+
+| Workflow | Trigger | Status |
+|---|---|---|
+| `pull-request.yml` | pull request, push to main | Never run |
+| `publish-images.yml` | release, or manual with a literal `PUBLISH` | Never run; nothing has been pushed to any registry |
+| `terraform-plan.yml` | manual only | Never run; **contains no `terraform apply`** |
+| `deploy.yml` | manual only | Never run; nothing has been deployed to any cluster |
+
+The pull-request workflow runs the build with Testcontainers integration tests
+(not skipped), Spotless, gitleaks over the **full history**, dependency review,
+image builds that are scanned and never pushed, SBOM generation, the Terraform
+and Helm validation scripts, and actionlint over the workflows themselves.
+
+Decisions worth recording:
+
+- **Every third-party action is pinned to a commit SHA**, with the tag in a
+  trailing comment. A tag is a movable pointer: whoever controls the action's
+  repository can repoint `v4` at new code, and that code runs with the job's
+  token. `scripts/check-action-pins.sh` enforces it, and was tested against a
+  planted tag and a planted branch reference as well as against the real tree.
+- **The image scan fails the publish workflow but only reports on a pull
+  request.** A base-image CVE with no fix available should not block unrelated
+  work; at the point of shipping it must. `ignore-unfixed` keeps the hard stop
+  actionable.
+- **There is no automatic path from a merge to a deployment.** Deploying needs
+  a manual trigger, a literal `DEPLOY` typed into a text field, a protected
+  environment whose required reviewers are configured **outside** the
+  repository, an immutable image digest per service, and a server-side Helm dry
+  run.
+- **The deploy gates were tested, not just written.** The digest validator was
+  extracted and run against valid digests and against a tag, and rejects the
+  tag. The Helm digest contract was proven by rendering the chart with
+  `--set-string services.<name>.digest=...` and confirming all four images
+  resolve to `...@sha256:...`.
+- **gitleaks and kubeconform are downloaded and checksum-verified** in CI rather
+  than pulled through a marketplace action, so the versions match the ones used
+  locally and no licence key is involved.
+
+Documentation added: `SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
+`docs/security/threat-model.md` (STRIDE),
+`docs/security/data-classification.md`,
+`docs/security/incident-response.md`,
+`docs/operations/runbooks/secret-rotation.md`, a pull-request template, a
+`CODEOWNERS.example` (named `.example` so no real handles are published), a
+Dependabot configuration for Maven, Docker, Actions and Terraform, and an
+opt-in pre-commit configuration whose first hook is gitleaks.
+
+---
+
 ## Known limitations
 
 - The four external checks (KYC, AML, fraud, credit scoring) and the malware
   scanner are **simulations behind ports**. They are labelled as such in code and
   documentation. No real financial or security service is contacted.
-- **`docs/` is almost entirely missing.** Only `docs/security/scanning.md`
-  exists. The ADRs, runbooks, cost breakdown, threat model, OpenAPI document and
-  README diagrams are Phase 12 work, and files already in the tree link to them.
-  Those links are currently broken.
-- **`SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` and `.github/` do not
-  exist yet.** There is no CI at all: every check listed above is run by hand
-  through the scripts in `scripts/`.
+- **No CI has ever executed.** All four workflows exist and are lint-clean
+  under actionlint, but the repository has no remote, so GitHub Actions has
+  never run a job. "The YAML is valid and the same commands pass locally" is a
+  weaker claim than "the pipeline is green", and only the weaker one is made.
+- **`docs/` is still incomplete.** Present: `docs/security/` (scanning,
+  threat model, data classification, incident response) and
+  `docs/operations/runbooks/secret-rotation.md`. Missing, and linked to from
+  files already in the tree: the ADRs, the remaining eight runbooks,
+  `docs/operations/cost.md`, `docs/operations/terraform-state-bootstrap.md`,
+  `docs/api/openapi.yaml`, `docs/public-release-checklist.md`. **Those links are
+  currently broken**, and `scripts/check-doc-links.sh` reports exactly which:
+  16 referenced documents do not exist. It runs as part of `make release-check`
+  — the gate before public release, which is correctly not passing yet — rather
+  than in the pull-request workflow, because a check that is always red is a
+  check people learn to ignore.
+- **Trivy and the dependency review have never run**, because CI has never run.
+  No container image in this repository has been vulnerability-scanned.
+- The IAM roles the workflows assume **do not exist**, and their trust policies
+  are described in comments rather than written as Terraform. A trust policy
+  scoped to the repository but not the ref would let any branch assume the role;
+  that is the review that matters most when they become real.
 - **`tests/end-to-end` is an empty module** — a POM and nothing else. The
-  end-to-end path has been exercised through `make local-smoke-test` against the
+  end-to-end path has been exercised through `scripts/local-smoke-test.sh` against the
   Compose stack, but not as an automated suite.
 - `tests/performance` and `tests/security` do not exist. The k6 scripts are
   Phase 12 work.
@@ -296,24 +377,33 @@ copy rather than assumed. See [`docs/security/scanning.md`](docs/security/scanni
   context. This can only delay a submission, never wrongly permit one, but it
   does mean a submission may be refused for a document that has in fact just been
   accepted. Documented in the migration that creates the table.
-- Container image scanning and dependency vulnerability scanning have not been
-  run. Both are Phase 11 CI steps.
+- The Makefile targets have **not been executed on this machine** — GNU make
+  is not installed here. Each target is a thin wrapper over a script or a Maven
+  invocation, and those were run directly.
+- `CODEOWNERS.example` is deliberately not active. Renaming it to `CODEOWNERS`
+  does nothing on its own: it only has teeth when the branch protection rule for
+  `main` requires review from code owners.
 
 ---
 
 ## Exact next step
 
-**Phase 11 — CI/CD and security scanning.** A pull-request workflow running
-everything the local scripts run (build, unit, integration, ArchUnit, format,
-dependency scan, gitleaks over full history, image build **without push**, image
-scan, SBOM, Terraform fmt/validate/tflint/checkov, Helm lint/template,
-kubeconform); least-privilege `permissions:` on every job; every third-party
-action pinned to a commit SHA with a version comment.
+**Phase 12 — end-to-end suite, documentation, public-release review.**
 
-Then the three workflows that exist but are **never executed here**: an ECR
-publish (OIDC, immutable digest), a Terraform plan that never applies, and a
-manual deploy gated on `workflow_dispatch`, a literal `DEPLOY` confirmation, a
-protected environment and required reviewers.
+1. `tests/end-to-end`, currently an empty module: the full happy path plus a
+   repeated idempotency key, the same key with a different payload, concurrent
+   submission, Kafka outage and recovery, a transient external failure, a
+   permanent rejection, a manual-review decision, a duplicate event, an
+   out-of-order event, a rejected document and a missing mandatory document.
+2. `docs/api/openapi.yaml` (OpenAPI 3.1) — the pull-request workflow already
+   has a job waiting for it, which currently reports the file's absence rather
+   than passing silently.
+3. The documentation the tree already links to and does not have: 12+ ADRs, the
+   remaining runbooks, `docs/operations/cost.md`,
+   `docs/operations/terraform-state-bootstrap.md`, and a README with the
+   architecture diagrams.
+4. `tests/performance` k6 scripts, not run by default.
+5. `docs/public-release-checklist.md` and a final full-history gitleaks scan.
 
-Followed by `SECURITY.md`, the STRIDE threat model, data classification,
-retention, an incident-response outline and a secret-rotation runbook.
+The broken documentation links are the most visible gap: several files written
+in phases 9 to 11 reference documents that do not exist yet.

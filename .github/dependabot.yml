@@ -1,0 +1,129 @@
+# =============================================================================
+# Dependabot.
+#
+# Four ecosystems, because a dependency this platform does not update is a
+# dependency somebody else is updating for them. GitHub Actions is included
+# deliberately and is the one most often forgotten: an action runs with a token
+# scoped to the repository, so an unmaintained action is a supply-chain path,
+# not merely stale.
+#
+# THIS HAS NEVER RUN. The repository has no remote, so Dependabot has never
+# opened a pull request here.
+# =============================================================================
+
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------
+  # Maven.
+  #
+  # Grouped, because forty individual pull requests are forty reviews nobody
+  # does, and the fortieth is where the interesting change hides. Grouping keeps
+  # the routine ones in one reviewable batch while leaving anything unusual --
+  # a major version, Spring Boot itself -- on its own.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 10
+    labels: [dependencies, java]
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      spring-boot:
+        # Spring Boot's BOM moves dozens of managed versions at once. Splitting
+        # it across pull requests produces conflicting sets that individually
+        # do not build.
+        patterns:
+          - "org.springframework*:*"
+        update-types: [minor, patch]
+      aws-sdk:
+        patterns:
+          - "software.amazon.awssdk:*"
+        update-types: [minor, patch]
+      test-dependencies:
+        patterns:
+          - "org.junit*:*"
+          - "org.testcontainers:*"
+          - "org.assertj:*"
+          - "org.mockito:*"
+          - "com.tngtech.archunit:*"
+          - "org.wiremock:*"
+        update-types: [minor, patch]
+      build-plugins:
+        patterns:
+          - "org.apache.maven.plugins:*"
+          - "com.diffplug.spotless:*"
+          - "org.jacoco:*"
+        update-types: [minor, patch]
+    ignore:
+      # A major version is a deliberate migration with its own branch and its
+      # own testing, not something to merge from a bot's pull request. Phase 1
+      # of this project is a working demonstration of why: Spring Boot 4 moved
+      # auto-configuration into per-technology modules, and a build that
+      # compiled cleanly would have silently stopped running migrations.
+      - dependency-name: "*"
+        update-types: [version-update:semver-major]
+
+  # ---------------------------------------------------------------------------
+  # Docker base images.
+  #
+  # The Dockerfiles pin by DIGEST, not by tag, so a rebuild is reproducible and
+  # a base image cannot change underneath the platform. The cost of that is that
+  # security patches do not arrive on their own -- which is exactly what this
+  # update is for.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: docker
+    directory: /deploy/docker
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    labels: [dependencies, docker, security]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions.
+  #
+  # Every action is pinned to a commit SHA with the tag in a trailing comment.
+  # Dependabot understands that convention and updates both together, so pinning
+  # does not mean going stale.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 5
+    labels: [dependencies, ci, security]
+    commit-message:
+      prefix: "chore(deps)"
+
+  # ---------------------------------------------------------------------------
+  # Terraform providers.
+  #
+  # The environments own the provider version constraints and the lock files, so
+  # those are the directories that get updated. The reusable modules do not pin
+  # provider versions -- their callers do.
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: terraform
+    directories:
+      - /infrastructure/terraform/environments/dev
+      - /infrastructure/terraform/environments/prod-example
+    schedule:
+      interval: monthly
+      time: "06:00"
+      timezone: Europe/Warsaw
+    open-pull-requests-limit: 3
+    labels: [dependencies, terraform]
+    commit-message:
+      prefix: "chore(deps)"
