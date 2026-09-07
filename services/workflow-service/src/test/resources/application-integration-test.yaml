@@ -1,0 +1,50 @@
+# Integration-test profile for the workflow service.
+#
+# Connection details are injected at runtime from the Testcontainers instances,
+# so nothing here points at a real host.
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    clean-disabled: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          # The workflow service exposes no API these tests call, but the
+          # resource server still needs an issuer to start. A loopback
+          # placeholder is never contacted because no test presents a token.
+          issuer-uri: http://localhost:1/not-used-by-these-tests
+
+los:
+  environment: integration-test
+  outbox:
+    batch-size: 10
+    max-attempts: 3
+    base-backoff: PT0.05S
+    max-backoff: PT0.2S
+    send-timeout: PT2S
+  checks:
+    # Small values so the retry and timeout paths complete within a test.
+    timeout: PT1S
+    bulkhead-concurrency: 4
+    bulkhead-queue-capacity: 8
+    circuit-breaker:
+      # Effectively disabled for these tests: a breaker opening mid-suite would
+      # make the retry assertions depend on the order tests happened to run in.
+      # The breaker has its own dedicated test.
+      failure-rate-threshold: 100
+      minimum-calls: 1000
+      sliding-window-size: 1000
+
+logging:
+  structured:
+    format:
+      console: ""
+  level:
+    root: WARN
+    com.example.los: DEBUG
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
