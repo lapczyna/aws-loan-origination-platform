@@ -14,19 +14,37 @@
   <artifactId>end-to-end-tests</artifactId>
   <name>Tests :: End To End</name>
   <description>
-    Cross-service end-to-end scenarios. All four services are started as separate
-    Spring application contexts inside one JVM, wired to shared PostgreSQL, Kafka
-    and LocalStack containers, so the tests exercise the real HTTP APIs, the real
-    outbox, real Kafka delivery and real presigned S3 uploads.
+    Cross-service end-to-end scenarios.
 
-    The Docker Compose stack is verified separately by scripts/local-smoke-test.sh.
+    The four services run as four separate operating-system processes, launched
+    from their real executable jars, against shared PostgreSQL, Kafka and
+    LocalStack containers. Everything between them is real: real HTTP, real
+    Kafka delivery, real outbox draining, real presigned S3 uploads, real Flyway
+    migrations, real token validation.
+
+    Separate processes rather than four Spring contexts in one JVM, because every
+    service jar carries its own /application.yaml and its own
+    db/migration/V1__*.sql. On a shared classpath Spring would resolve the first
+    application.yaml it found for all four services, and Flyway would refuse to
+    start on four migrations all claiming version 1. Working around that would
+    mean testing a configuration that differs from the deployed one, which is the
+    property this suite exists to check.
+
+    The container images and the Compose stack are exercised separately by
+    scripts/local-smoke-test.sh, so neither path is left unverified.
   </description>
 
   <properties>
     <maven.deploy.skip>true</maven.deploy.skip>
     <maven.install.skip>true</maven.install.skip>
-    <!-- Unit-test phase is unused here; everything runs under Failsafe. -->
-    <skipTests>true</skipTests>
+    <!--
+      There are no unit tests in this module; everything runs under Failsafe.
+
+      Note what is NOT set here: skipTests. Failsafe honours skipTests as well as
+      skipITs, so setting it to true to silence Surefire would silently disable
+      this entire suite, which is exactly what it did until it was noticed.
+      Surefire simply finds nothing to run instead.
+    -->
     <skipITs>false</skipITs>
   </properties>
 
@@ -36,6 +54,27 @@
       <artifactId>test-support</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <!--
+      The event contracts: topic names, event types and the canonical mapper, so
+      assertions about what was published use the same definitions the services
+      publish with rather than string literals that can drift.
+    -->
+    <dependency>
+      <groupId>com.example.los</groupId>
+      <artifactId>event-contracts</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!--
+      The four services.
+
+      NOT because the tests use their classes — they deliberately do not; every
+      interaction goes over HTTP, Kafka or JDBC. They are here so the Maven
+      reactor builds the executable jars BEFORE this module runs. Without the
+      dependency the ordering is unspecified and the suite fails with "no
+      executable jar at ...", intermittently and confusingly.
+    -->
     <dependency>
       <groupId>com.example.los</groupId>
       <artifactId>application-service</artifactId>
@@ -56,5 +95,47 @@
       <artifactId>audit-service</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <!-- Asserting on rows the services actually wrote. -->
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- Creating the documents bucket, as Terraform would. -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>s3</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- Reading events straight off the topics, to assert what was published. -->
+    <dependency>
+      <groupId>org.apache.kafka</groupId>
+      <artifactId>kafka-clients</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <!--
+              Passed explicitly rather than derived from the working directory:
+              a test that guesses at the repository layout breaks the first time
+              somebody runs it from somewhere unexpected, and the failure looks
+              like a missing jar rather than a wrong path.
+            -->
+            <los.services.directory>${project.basedir}/../../services</los.services.directory>
+            <los.project.version>${project.version}</los.project.version>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
 </project>

@@ -82,10 +82,22 @@ replay_pid*
 dependency-reduced-pom.xml
 
 # --- Build / scan outputs ---------------------------------------------------
-build/
-out/
-dist/
-bin/
+#
+# EVERY PATTERN HERE IS ANCHORED WITH A LEADING SLASH, and that is not a style
+# choice. An unanchored `out/` matches a directory called "out" at ANY depth,
+# and this codebase is hexagonal: every service has
+# adapter/out/{persistence,messaging,s3,external}. The unanchored form silently
+# excluded 58 source files -- every outbound adapter in the platform -- from
+# version control. Nothing failed, because the build reads the working tree and
+# only git was blind; it was found when a change to one of those files did not
+# appear in `git status`.
+#
+# Anchored, these mean "at the repository root", which is what an IDE or build
+# output directory actually is.
+/build/
+/out/
+/dist/
+/bin/
 *.sbom.json
 sbom/
 *.cyclonedx.json
