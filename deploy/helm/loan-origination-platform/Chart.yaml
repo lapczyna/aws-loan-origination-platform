@@ -1,0 +1,24 @@
+apiVersion: v2
+name: loan-origination-platform
+description: |
+  The loan origination platform: four services deployed to Amazon EKS.
+
+  NOTHING IN THIS CHART HAS BEEN INSTALLED. It is linted, templated and
+  validated against the Kubernetes schemas in CI, and never applied to a
+  cluster by this repository.
+type: application
+
+# The chart version tracks the chart's own shape. appVersion tracks the
+# software. They move independently: a change to a probe or a resource limit is
+# a chart change with no new application build behind it.
+version: 0.1.0
+appVersion: "0.1.0"
+
+kubeVersion: ">=1.29.0-0"
+
+keywords:
+  - loan-origination
+  - reference-implementation
+home: https://example.com/loan-origination-platform
+maintainers:
+  - name: AWS Loan Origination Platform contributors

@@ -1,0 +1,9 @@
+.DS_Store
+.git/
+.gitignore
+*.tmp
+*.orig
+*.swp
+# Environment files are supplied with -f at deployment time; packaging them into
+# the chart would ship one environment's configuration to every other.
+environments/

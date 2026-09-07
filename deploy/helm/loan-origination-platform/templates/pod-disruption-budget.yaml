@@ -1,0 +1,29 @@
+{{- /*
+Pod Disruption Budgets.
+
+Without one, a node drain -- a cluster upgrade, a spot reclaim, a scale-down --
+can evict every replica of a service at once. Kubernetes considers that
+perfectly legal: nothing tells it the pods are related in a way that matters.
+
+minAvailable is expressed as a COUNT rather than a percentage. With two replicas,
+"50%" rounds in ways that permit taking both down in some Kubernetes versions;
+"1" cannot be misread.
+*/ -}}
+{{- range $serviceName, $service := .Values.services }}
+{{- $ctx := dict "root" $ "serviceName" $serviceName "service" $service }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "los.fullname" $ctx }}
+  labels:
+    {{- include "los.labels" $ctx | nindent 4 }}
+spec:
+  minAvailable: {{ $service.minAvailable | default 1 }}
+  selector:
+    matchLabels:
+      {{- include "los.selectorLabels" $ctx | nindent 6 }}
+  # If every pod is already unhealthy the budget must not block eviction --
+  # otherwise a broken deployment cannot be drained off a node at all.
+  unhealthyPodEvictionPolicy: AlwaysAllow
+{{- end }}

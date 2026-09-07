@@ -1,0 +1,103 @@
+{{- /*
+NetworkPolicies: default-deny, then explicit allows.
+
+The default-deny rule is the whole point. Without it, Kubernetes networking is
+flat: any compromised pod anywhere in the cluster can reach every service, every
+database and the cloud metadata endpoint. Naming what may talk to what turns
+lateral movement from the default behaviour into something an attacker has to
+work around.
+
+Egress is restricted as well as ingress, and that is the half most often
+skipped. An egress policy is what stops a compromised pod exfiltrating data to
+an arbitrary host, and what blocks the link-local metadata address that would
+otherwise hand out the node's IAM credentials.
+*/ -}}
+{{- if .Values.networkPolicies.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}-default-deny
+  labels:
+    app.kubernetes.io/part-of: loan-origination-platform
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+spec:
+  # Empty selector: every pod in the namespace.
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  # No rules at all, so nothing is permitted until a policy below allows it.
+
+{{- range $serviceName, $service := .Values.services }}
+{{- $ctx := dict "root" $ "serviceName" $serviceName "service" $service }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "los.fullname" $ctx }}
+  labels:
+    {{- include "los.labels" $ctx | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "los.selectorLabels" $ctx | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- if $service.exposed }}
+    # Only services that are actually part of the public API accept ingress, and
+    # only from the ingress controller. The workflow and audit services accept
+    # none at all: they are driven entirely by events and schedulers, so nothing
+    # should ever connect to them.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.ingress.controllerNamespace }}
+      ports:
+        - protocol: TCP
+          port: {{ $service.port }}
+    {{- end }}
+    # Scraping is allowed from the monitoring namespace regardless, otherwise
+    # the default-deny rule silently blinds observability.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.observability.namespace }}
+      ports:
+        - protocol: TCP
+          port: {{ $service.port }}
+  egress:
+    # DNS. Everything else fails in confusing ways without it.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # PostgreSQL, Kafka, S3, Secrets Manager and the identity provider all sit
+    # outside the cluster, reached by IP. The metadata endpoint is excluded
+    # below rather than allowed here.
+    - to:
+        - ipBlock:
+            cidr: {{ $.Values.networkPolicies.vpcCidr }}
+            except:
+              # 169.254.169.254 is the instance metadata service. A pod that can
+              # reach it can request the NODE's IAM credentials, which are
+              # broader than any pod's -- and that path bypasses Pod Identity
+              # entirely. This exclusion is the single most valuable line in the
+              # policy.
+              - 169.254.169.254/32
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.database.port }}
+        - protocol: TCP
+          port: 9098
+        - protocol: TCP
+          port: 443
+{{- end }}
+{{- end }}

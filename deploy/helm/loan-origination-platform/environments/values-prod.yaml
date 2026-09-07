@@ -1,0 +1,73 @@
+# Production example.
+#
+# EVERY VALUE IS A PLACEHOLDER and this configuration has never been applied.
+# See docs/operations/cost.md before deploying anything: EKS, MSK, NAT Gateway
+# and Multi-AZ RDS together are the dominant cost drivers.
+#
+# NO SECRETS. Credentials come from AWS Secrets Manager via the CSI driver.
+
+environment: prod
+
+services:
+  application-service:
+    # Three replicas across three Availability Zones, so losing a zone leaves
+    # two. Two replicas across two zones leaves one, which is not capacity.
+    replicas: 3
+    minAvailable: 2
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 1536Mi
+    autoscaling:
+      minReplicas: 3
+      maxReplicas: 20
+      targetCpuUtilization: 65
+
+  document-service:
+    replicas: 3
+    minAvailable: 2
+    resources:
+      requests:
+        cpu: 400m
+        memory: 1Gi
+      limits:
+        memory: 1536Mi
+    autoscaling:
+      minReplicas: 3
+      maxReplicas: 12
+      targetCpuUtilization: 65
+
+  workflow-service:
+    replicas: 3
+    minAvailable: 2
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 1536Mi
+    autoscaling:
+      minReplicas: 3
+      maxReplicas: 24
+      targetCpuUtilization: 60
+
+  audit-service:
+    replicas: 3
+    minAvailable: 2
+    resources:
+      requests:
+        cpu: 300m
+        memory: 768Mi
+      limits:
+        memory: 1Gi
+    autoscaling:
+      minReplicas: 3
+      maxReplicas: 10
+      targetCpuUtilization: 70
+
+security:
+  # Still empty. A production CORS origin is a deliberate decision recorded at
+  # deployment time, not a default anyone can inherit by accident.
+  corsAllowedOrigins: ""

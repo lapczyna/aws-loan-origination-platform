@@ -1,0 +1,64 @@
+{{- /*
+Ingress, backed by an INTERNAL AWS load balancer.
+
+The scheme annotation is the load-bearing line. "internal" gives the load
+balancer private IPs only, so the only way to reach it is from inside the VPC --
+which in this architecture means through API Gateway's VPC Link. Change it to
+"internet-facing" and the entire edge (WAF, JWT authorizer, throttling, usage
+plans, access logging) is bypassed, silently, while everything still appears to
+work.
+
+That is why the template refuses to render an internet-facing scheme at all.
+*/ -}}
+{{- if .Values.ingress.enabled }}
+{{- if ne .Values.ingress.scheme "internal" }}
+{{- fail "ingress.scheme must be \"internal\". An internet-facing load balancer bypasses WAF, the JWT authorizer, throttling and access logging. If you genuinely intend a public route, change the architecture deliberately rather than this value." }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-ingress
+  labels:
+    app.kubernetes.io/part-of: loan-origination-platform
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    kubernetes.io/ingress.class: alb
+    alb.ingress.kubernetes.io/scheme: internal
+    alb.ingress.kubernetes.io/target-type: ip
+    # Health checks hit the readiness endpoint, so the load balancer's view of
+    # health matches Kubernetes'. A mismatch means traffic is sent to pods the
+    # cluster considers unready.
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health/readiness
+    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "10"
+    alb.ingress.kubernetes.io/success-codes: "200"
+    alb.ingress.kubernetes.io/backend-protocol: HTTP
+    # TLS terminates at API Gateway; this hop is inside the VPC. Documented
+    # rather than assumed, because "it's internal" is how unencrypted internal
+    # traffic gets normalised.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}]'
+    alb.ingress.kubernetes.io/load-balancer-attributes: >-
+      idle_timeout.timeout_seconds=60,
+      routing.http.drop_invalid_header_fields.enabled=true
+    alb.ingress.kubernetes.io/tags: >-
+      Project=loan-origination-platform,
+      Environment={{ .Values.environment }},
+      ManagedBy=helm
+spec:
+  rules:
+    - http:
+        paths:
+          {{- range $serviceName, $service := .Values.services }}
+          {{- if $service.exposed }}
+          {{- range $path := $service.paths }}
+          - path: {{ $path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ printf "%s-%s" $.Release.Name $serviceName }}
+                port:
+                  number: {{ $service.port }}
+          {{- end }}
+          {{- end }}
+          {{- end }}
+{{- end }}

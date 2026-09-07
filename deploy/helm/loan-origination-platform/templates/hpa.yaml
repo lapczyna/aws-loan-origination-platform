@@ -1,0 +1,60 @@
+{{- /*
+Horizontal Pod Autoscalers.
+
+Scaled on CPU rather than a custom metric, deliberately: these services are
+mostly I/O bound, and CPU is the signal that actually correlates with load
+without needing a metrics pipeline the autoscaler would then depend on.
+
+The behaviour block matters more than the thresholds. Kubernetes defaults scale
+DOWN aggressively, which produces flapping: a brief lull removes pods, the load
+returns, and the service is under-provisioned exactly while it recovers. The
+long stabilisation window below makes scale-down deliberate and scale-up fast,
+which is the correct asymmetry -- being over-provisioned costs money, being
+under-provisioned costs availability.
+*/ -}}
+{{- if .Values.autoscaling.enabled }}
+{{- range $serviceName, $service := .Values.services }}
+{{- $ctx := dict "root" $ "serviceName" $serviceName "service" $service }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "los.fullname" $ctx }}
+  labels:
+    {{- include "los.labels" $ctx | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "los.fullname" $ctx }}
+  minReplicas: {{ $service.autoscaling.minReplicas | default 2 }}
+  maxReplicas: {{ $service.autoscaling.maxReplicas | default 6 }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $service.autoscaling.targetCpuUtilization | default 70 }}
+  behavior:
+    scaleUp:
+      # React quickly: the cost of a spare pod is far lower than the cost of
+      # queuing requests.
+      stabilizationWindowSeconds: 60
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+      selectPolicy: Max
+    scaleDown:
+      # Five minutes of sustained low load before removing anything. Shorter
+      # windows produce flapping, and each removal drops in-flight requests that
+      # the terminationGracePeriod then has to drain.
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120
+      selectPolicy: Min
+{{- end }}
+{{- end }}

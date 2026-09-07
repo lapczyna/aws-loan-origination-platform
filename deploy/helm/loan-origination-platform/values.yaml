@@ -1,0 +1,164 @@
+# =============================================================================
+# Default values.
+#
+# THIS FILE CONTAINS NO SECRETS AND NO REAL ENVIRONMENT IDENTIFIERS.
+#
+# Every host name, account identifier and ARN below is a placeholder on a
+# reserved example domain. Real values are supplied by an environment values
+# file at deployment time, and secrets never appear in either: they are pulled
+# from AWS Secrets Manager and projected into the pod as files.
+#
+# NOTHING IN THIS CHART HAS BEEN INSTALLED. It is linted, rendered and validated
+# against the Kubernetes schemas; it is never applied to a cluster from this
+# repository.
+# =============================================================================
+
+environment: dev
+
+image:
+  # Placeholder registry. A real ECR registry is
+  # <account-id>.dkr.ecr.<region>.amazonaws.com, and committing one would put an
+  # account identifier in a public repository.
+  registry: registry.example.com/loan-origination
+  # IfNotPresent, paired with immutable tags or digests. "Always" on a mutable
+  # tag means the running version can change on any pod restart, with no
+  # deployment and no record of what changed.
+  pullPolicy: IfNotPresent
+
+# -----------------------------------------------------------------------------
+# The services.
+#
+# `exposed` decides whether anything may connect to the pod at all: it drives
+# both the ingress rules and the NetworkPolicy. The workflow and audit services
+# are false because they are driven entirely by events and schedulers -- nothing
+# should ever open a connection to them, and saying so makes that enforceable
+# rather than merely true today.
+# -----------------------------------------------------------------------------
+services:
+  application-service:
+    port: 8081
+    replicas: 2
+    exposed: true
+    paths:
+      - /v1/applications
+      - /v1/manual-review
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        memory: 768Mi
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 8
+      targetCpuUtilization: 70
+
+  document-service:
+    port: 8082
+    replicas: 2
+    exposed: true
+    paths:
+      - /v1/applications/{id}/documents
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 768Mi
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 6
+      targetCpuUtilization: 70
+
+  workflow-service:
+    port: 8083
+    replicas: 2
+    # No ingress at all. It consumes events and runs a scheduler; nothing calls
+    # it, so nothing may connect to it.
+    exposed: false
+    resources:
+      requests:
+        cpu: 300m
+        memory: 512Mi
+      limits:
+        memory: 768Mi
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 10
+      targetCpuUtilization: 65
+
+  audit-service:
+    port: 8084
+    replicas: 2
+    exposed: false
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        memory: 640Mi
+    autoscaling:
+      minReplicas: 2
+      maxReplicas: 6
+      targetCpuUtilization: 70
+
+# -----------------------------------------------------------------------------
+# Infrastructure endpoints. All placeholders.
+# -----------------------------------------------------------------------------
+database:
+  # A real RDS endpoint names the account's region and instance and is not
+  # committed here.
+  host: postgres.internal.example.com
+  port: 5432
+  name: los
+
+kafka:
+  # A real MSK bootstrap string names brokers, the account and the region.
+  bootstrapServers: b-1.msk.internal.example.com:9098
+
+oauth2:
+  # A real issuer URI identifies a Cognito user pool or an identity tenant.
+  issuerUri: https://issuer.example.com/realms/loan-origination
+  audiences: loan-origination-api
+
+aws:
+  region: eu-west-1
+  # A PLACEHOLDER. Twelve zeroes is not a real account, and the template builds
+  # role ARNs from it so that rendering the chart without an environment file
+  # cannot produce a usable reference to anyone's account.
+  accountIdPlaceholder: "000000000000"
+  documentsBucket: los-dev-documents
+  auditBucket: los-dev-audit
+  podIdentity:
+    # EKS Pod Identity rather than IRSA: it removes the OIDC trust relationship,
+    # so a role cannot be assumed from outside the cluster even if its trust
+    # policy is wrong.
+    enabled: true
+
+secrets:
+  # Secrets Store CSI driver, mounting Secrets Manager values as files.
+  enabled: true
+
+ingress:
+  enabled: true
+  # Only "internal" is accepted; the template refuses to render anything else.
+  scheme: internal
+  controllerNamespace: ingress-nginx
+
+networkPolicies:
+  enabled: true
+  # The VPC's own range, so pods can reach RDS, MSK and the AWS APIs while the
+  # policy excludes the instance metadata endpoint. RFC 1918 by default.
+  vpcCidr: 10.0.0.0/16
+
+autoscaling:
+  enabled: true
+
+observability:
+  namespace: observability
+  otlpEndpoint: http://otel-collector.observability.svc.cluster.local:4317
+
+security:
+  # No origin permitted by default. A wildcard would let any website make
+  # authenticated requests from a victim's browser.
+  corsAllowedOrigins: ""

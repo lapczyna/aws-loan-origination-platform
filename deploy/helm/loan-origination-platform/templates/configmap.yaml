@@ -1,0 +1,35 @@
+{{- /*
+Non-sensitive configuration.
+
+NOTHING SECRET GOES HERE. A ConfigMap is readable by anything with get access in
+the namespace, is printed in full by `kubectl describe`, and is stored
+unencrypted in etcd by default. Credentials and key material are projected as
+files by the Secrets Store CSI driver instead; see secret-provider-class.yaml.
+
+Every value below is an endpoint, a name or a tuning parameter.
+*/ -}}
+{{- range $serviceName, $service := .Values.services }}
+{{- $ctx := dict "root" $ "serviceName" $serviceName "service" $service }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "los.fullname" $ctx }}-config
+  labels:
+    {{- include "los.labels" $ctx | nindent 4 }}
+data:
+  LOS_DATASOURCE_URL: {{ printf "jdbc:postgresql://%s:%v/%s" $.Values.database.host (int $.Values.database.port) $.Values.database.name | quote }}
+  LOS_DATASOURCE_USERNAME: {{ printf "los_%s_runtime" (trimSuffix "-service" $serviceName) | quote }}
+  LOS_KAFKA_BOOTSTRAP_SERVERS: {{ $.Values.kafka.bootstrapServers | quote }}
+  LOS_OAUTH2_ISSUER_URI: {{ $.Values.oauth2.issuerUri | quote }}
+  LOS_OAUTH2_AUDIENCES: {{ $.Values.oauth2.audiences | quote }}
+  LOS_AWS_REGION: {{ $.Values.aws.region | quote }}
+  LOS_OTLP_ENDPOINT: {{ $.Values.observability.otlpEndpoint | quote }}
+  LOS_CORS_ALLOWED_ORIGINS: {{ $.Values.security.corsAllowedOrigins | quote }}
+  {{- if eq $serviceName "document-service" }}
+  LOS_DOCUMENTS_BUCKET: {{ $.Values.aws.documentsBucket | quote }}
+  {{- end }}
+  {{- if eq $serviceName "audit-service" }}
+  LOS_AUDIT_BUCKET: {{ $.Values.aws.auditBucket | quote }}
+  {{- end }}
+{{- end }}

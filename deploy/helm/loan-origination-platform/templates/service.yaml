@@ -1,0 +1,29 @@
+{{- /*
+ClusterIP services.
+
+ClusterIP and nothing else. There is no LoadBalancer and no NodePort here on
+purpose: the only route into the platform is
+  client -> WAF -> API Gateway -> VPC Link -> internal load balancer -> ingress
+A Service of type LoadBalancer would create a second, public route that bypasses
+WAF, the JWT authorizer, throttling and access logging entirely -- and it would
+do so silently, because everything would still appear to work.
+*/ -}}
+{{- range $serviceName, $service := .Values.services }}
+{{- $ctx := dict "root" $ "serviceName" $serviceName "service" $service }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "los.fullname" $ctx }}
+  labels:
+    {{- include "los.labels" $ctx | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: {{ $service.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "los.selectorLabels" $ctx | nindent 4 }}
+{{- end }}

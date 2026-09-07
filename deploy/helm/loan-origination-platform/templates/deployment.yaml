@@ -1,0 +1,216 @@
+{{- /*
+One Deployment per service.
+
+Templated from a map rather than written four times: four near-identical
+manifests drift, and a hardening change applied to three of them is a hardening
+change that did not happen.
+*/ -}}
+{{- range $serviceName, $service := .Values.services }}
+{{- $ctx := dict "root" $ "serviceName" $serviceName "service" $service }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "los.fullname" $ctx }}
+  labels:
+    {{- include "los.labels" $ctx | nindent 4 }}
+spec:
+  replicas: {{ $service.replicas | default 2 }}
+
+  # Deliberately not revisionHistoryLimit: 0. Keeping a few old ReplicaSets is
+  # what makes `kubectl rollout undo` work, and a rollback that needs a rebuild
+  # is not a rollback.
+  revisionHistoryLimit: 5
+
+  # How long a new pod has to become Ready before the rollout is declared
+  # failed. Without this a broken image rolls forward forever and the deployment
+  # never reports failure.
+  progressDeadlineSeconds: 600
+
+  selector:
+    matchLabels:
+      {{- include "los.selectorLabels" $ctx | nindent 6 }}
+
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never take capacity away during a rollout: surge first, then remove.
+      # maxUnavailable > 0 with two replicas means running at half capacity
+      # through every deployment.
+      maxUnavailable: 0
+      maxSurge: 1
+
+  template:
+    metadata:
+      labels:
+        {{- include "los.labels" $ctx | nindent 8 }}
+      annotations:
+        # Restarts pods when non-secret configuration changes. Without this a
+        # ConfigMap edit applies only to pods that happen to restart later, so
+        # the fleet ends up running two different configurations.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+        {{- with $service.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "los.serviceAccountName" $ctx }}
+      # The pod does not call the Kubernetes API. Mounting a token it never uses
+      # hands a credential to anything that compromises the container.
+      automountServiceAccountToken: false
+
+      # Time for in-flight requests to drain. Must exceed the application's own
+      # shutdown timeout, or the kubelet kills the process mid-request and the
+      # graceful shutdown configured in the application never completes.
+      terminationGracePeriodSeconds: 45
+
+      securityContext:
+        runAsNonRoot: true
+        # The numeric UID baked into the image. A name would not work: the
+        # kubelet does not read the image's /etc/passwd.
+        runAsUser: 10001
+        runAsGroup: 10001
+        # Makes the emptyDir below writable by the container's group, which is
+        # what lets Tomcat create its work directory on a read-only filesystem.
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+
+      {{- if $service.topologySpread | default true }}
+      topologySpreadConstraints:
+        # Spread across Availability Zones first. Two replicas in one zone is
+        # not high availability, whatever the replica count says.
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          # ScheduleAnyway rather than DoNotSchedule: during a zone outage,
+          # running unbalanced beats not running.
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "los.selectorLabels" $ctx | nindent 14 }}
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "los.selectorLabels" $ctx | nindent 14 }}
+      {{- end }}
+
+      containers:
+        - name: {{ $serviceName }}
+          # Pinned by digest where one is supplied. A tag is mutable, so a
+          # tag-deployed workload can change without any deployment happening.
+          image: "{{ $.Values.image.registry }}/{{ $serviceName }}{{ if $service.digest }}@{{ $service.digest }}{{ else }}:{{ $service.tag | default $.Chart.AppVersion }}{{ end }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+
+          ports:
+            - name: http
+              containerPort: {{ $service.port }}
+              protocol: TCP
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            privileged: false
+            capabilities:
+              drop:
+                - ALL
+
+          env:
+            - name: SPRING_PROFILES_ACTIVE
+              value: aws
+            - name: SERVER_PORT
+              value: {{ $service.port | quote }}
+            - name: LOS_ENVIRONMENT
+              value: {{ $.Values.environment }}
+            # The pod's own identity, useful in logs and traces for telling two
+            # replicas apart during an incident.
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          envFrom:
+            - configMapRef:
+                name: {{ include "los.fullname" $ctx }}-config
+
+          volumeMounts:
+            # The only writable path. Everything else is read-only, which the
+            # image is built to tolerate.
+            - name: tmp
+              mountPath: /tmp/los
+            {{- if $.Values.secrets.enabled }}
+            # Secrets are projected as FILES by the Secrets Store CSI driver and
+            # read through a Spring config tree. Never environment variables:
+            # those are visible in the pod spec, in `kubectl describe`, and in
+            # any crash dump that captures the environment.
+            - name: secrets
+              mountPath: /etc/secrets
+              readOnly: true
+            {{- end }}
+
+          # Three distinct probes, because they answer three different questions.
+          #
+          # STARTUP: "has it finished booting?" Its generous budget is what lets
+          # liveness stay aggressive afterwards. Without it, a slow start looks
+          # like a hang and the pod is killed in a loop, never finishing.
+          startupProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+            timeoutSeconds: 3
+
+          # LIVENESS: "should this pod be restarted?" Deliberately excludes the
+          # database. Restarting a pod cannot fix a database outage, and doing so
+          # turns a recoverable dependency failure into a fleet-wide crash loop
+          # at the worst possible moment.
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          # READINESS: "should traffic be sent here?" This one DOES include the
+          # database, because a replica that cannot reach PostgreSQL should leave
+          # the load balancer while staying alive to recover.
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+
+          resources:
+            requests:
+              # Requests drive scheduling and are what the HPA measures against.
+              cpu: {{ $service.resources.requests.cpu }}
+              memory: {{ $service.resources.requests.memory }}
+            limits:
+              # No CPU limit on purpose. A CPU limit throttles the JVM during GC
+              # and at startup, which shows up as inexplicable latency spikes and
+              # failed startup probes. The request plus a PDB is the right
+              # control; throttling a latency-sensitive JVM is not.
+              memory: {{ $service.resources.limits.memory }}
+
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        {{- if $.Values.secrets.enabled }}
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: {{ include "los.fullname" $ctx }}-secrets
+        {{- end }}
+{{- end }}

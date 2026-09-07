@@ -1,0 +1,36 @@
+# Development environment.
+#
+# Every value here is a PLACEHOLDER. Real endpoints are supplied at deployment
+# time from Terraform outputs; committing them would put an account identifier
+# and internal host names into a repository that may become public.
+#
+# NO SECRETS. Credentials come from AWS Secrets Manager via the CSI driver.
+
+environment: dev
+
+services:
+  application-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 3
+  document-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 3
+  workflow-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 3
+  audit-service:
+    replicas: 1
+    autoscaling:
+      minReplicas: 1
+      maxReplicas: 2
+
+# A single replica cannot satisfy minAvailable: 1 and still be evictable, so
+# node drains would block. Development trades availability for cost.
+autoscaling:
+  enabled: true
