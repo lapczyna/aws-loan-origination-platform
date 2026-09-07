@@ -1,0 +1,274 @@
+# =============================================================================
+# Audit service configuration.
+#
+# THIS FILE CONTAINS NO SECRETS AND NEVER WILL.
+#
+# Credentials, the applicant pseudonymisation pepper and any other secret are
+# supplied as FILES: in AWS they are projected into the pod from AWS Secrets
+# Manager by the Secrets Store CSI driver and read through a Spring config tree;
+# locally they are generated into a gitignored directory by
+# scripts/generate-local-secrets.sh. Nothing secret is ever supplied as a
+# property or an environment variable, because both are visible in a pod spec,
+# in `docker inspect` and in crash dumps.
+#
+# Every host name and issuer below is a placeholder on a reserved example
+# domain. No real account identifier, ARN, tenant or hostname appears here.
+# =============================================================================
+
+spring:
+  application:
+    name: audit-service
+
+  lifecycle:
+    # Time for in-flight requests to finish before the JVM exits. Must be shorter
+    # than the Kubernetes terminationGracePeriodSeconds, or the pod is killed
+    # while it is still draining and those requests fail for real users.
+    timeout-per-shutdown-phase: 25s
+
+  # Secrets projected as files are read from this directory tree, so a rotated
+  # secret is picked up without rebuilding configuration.
+  config:
+    import: "optional:configtree:/etc/secrets/"
+
+  threads:
+    # Virtual threads for request handling. Safe on Java 25: JEP 491 removed the
+    # pinning that used to make a virtual thread block its carrier inside a
+    # synchronized block, which is what previously made this risky with JDBC
+    # connection pools. Blocking JDBC calls now unmount correctly.
+    virtual:
+      enabled: true
+
+  datasource:
+    hikari:
+      # Deliberately small. The bottleneck is PostgreSQL's connection capacity,
+      # not the application: a large pool per replica multiplied by the replica
+      # count is the usual way an autoscaled service exhausts a database.
+      maximum-pool-size: 10
+      minimum-idle: 2
+      # HikariCP takes plain milliseconds here, not Spring duration strings.
+      connection-timeout: 5000
+      # Shorter than the RDS idle timeout so the pool retires a connection before
+      # the server does and no request ever gets a half-closed socket. 25 minutes.
+      max-lifetime: 1500000
+      pool-name: audit-service-pool
+
+  jpa:
+    open-in-view: false          # A request must not hold a connection while rendering.
+    hibernate:
+      ddl-auto: validate         # Flyway owns the schema. Hibernate only verifies it.
+    properties:
+      hibernate:
+        jdbc:
+          batch_size: 50
+          time_zone: UTC
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    schemas: audit
+    default-schema: audit
+    # Refuses to run against a database that already has objects Flyway did not
+    # create, which is what stops a migration being applied to the wrong database.
+    baseline-on-migrate: false
+    validate-on-migrate: true
+
+  kafka:
+    # This service is a consumer only. It publishes nothing, which is why it has
+    # no outbox: there is no event whose delivery it must guarantee.
+    consumer:
+      # Offsets are committed by the container after the listener's transaction
+      # commits, so a failed listener redelivers rather than silently skipping.
+      enable-auto-commit: false
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      properties:
+        # Bounded so one slow poll cannot exceed max.poll.interval.ms and trigger
+        # a rebalance, which would redeliver everything in flight.
+        max.poll.records: 50
+    listener:
+      ack-mode: record
+      missing-topics-fatal: false
+
+server:
+  port: 8084
+  shutdown: graceful
+  error:
+    # Never expose a stack trace, an exception message or a binding error through
+    # the default error page. Errors are rendered by ApiExceptionHandler.
+    include-stacktrace: never
+    include-message: never
+    include-binding-errors: never
+    include-exception: false
+  tomcat:
+    max-http-form-post-size: 64KB
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Health, metrics and Prometheus scraping only. Never env, configprops,
+        # heapdump, threaddump, loggers or beans: each of those leaks
+        # configuration, credentials-in-memory or internal structure.
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      # Details only to an authenticated caller: an unauthenticated health
+      # response that names components tells an attacker what to attack.
+      show-details: when-authorized
+      show-components: when-authorized
+      probes:
+        enabled: true
+      group:
+        liveness:
+          # Liveness answers "should this pod be restarted?". It deliberately
+          # excludes the database: restarting a pod cannot fix a database outage,
+          # and doing so turns a recoverable dependency failure into a
+          # crash-loop across every replica at once.
+          include: livenessState
+        readiness:
+          # Readiness answers "should traffic be sent here?". It does include the
+          # database, because a replica that cannot reach PostgreSQL should be
+          # taken out of the load balancer while staying alive.
+          include: readinessState,db
+  metrics:
+    tags:
+      service: audit-service
+  tracing:
+    sampling:
+      # Sampled at 10% by default. Full sampling on a high-volume API costs more
+      # in egress and storage than it returns in insight; raise it while
+      # investigating.
+      probability: 0.1
+  observations:
+    key-values:
+      service: audit-service
+
+los:
+  environment: local
+
+  security:
+    # Placeholder issuer on a reserved example domain. Replace with your own
+    # identity provider. Never commit a real Cognito user-pool URL or tenant id.
+    accepted-audiences: los-local-api
+    cors:
+      allowed-origins: ""
+
+  kafka:
+    consumer-group:
+      audit: audit-service.all-events
+
+logging:
+  # Structured JSON on stdout, using Spring Boot's built-in support rather than a
+  # third-party encoder. The container runtime collects stdout; the application
+  # never writes a log file, so a read-only root filesystem is possible.
+  structured:
+    format:
+      console: ecs
+  level:
+    root: INFO
+    com.example.los: INFO
+    # Quiet by default. SQL logging at DEBUG prints bound parameters, which for
+    # this service means applicant names and email addresses in the log.
+    org.hibernate.SQL: WARN
+    org.hibernate.orm.jdbc.bind: WARN
+    org.springframework.web: WARN
+
+---
+# =============================================================================
+# LOCAL PROFILE - Docker Compose. Synthetic data only. Not production.
+# =============================================================================
+spring:
+  config:
+    activate:
+      on-profile: local
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:los}
+    # Synthetic local-only credentials. These grant access to a throwaway
+    # container and to nothing else. Production credentials never appear here.
+    username: ${POSTGRES_USER:los_local}
+    password: ${POSTGRES_PASSWORD:change-me-local-only}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:19092}
+    # PLAINTEXT locally. No AWS authentication is configured or attempted, so a
+    # developer machine never reaches for AWS credentials.
+    security:
+      protocol: PLAINTEXT
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${OAUTH2_ISSUER_URI:http://localhost:8090/realms/los-local}
+
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+
+los:
+  environment: local
+
+logging:
+  structured:
+    format:
+      # Human-readable locally. Structured JSON is for log aggregation, not for
+      # a developer reading a terminal.
+      console: ""
+  level:
+    com.example.los: DEBUG
+
+---
+# =============================================================================
+# AWS PROFILE - Amazon EKS. Referenced by the Helm charts.
+#
+# Contains no endpoint, account identifier or ARN: every value that differs
+# between environments is injected at deployment time.
+# =============================================================================
+spring:
+  config:
+    activate:
+      on-profile: aws
+
+  datasource:
+    url: ${LOS_DATASOURCE_URL}
+    username: ${LOS_DATASOURCE_USERNAME}
+    # Read from the Secrets Store CSI mount via the config tree import above, as
+    # los.datasource.password. Never set from an environment variable.
+    password: ${los.datasource.password:}
+
+  kafka:
+    bootstrap-servers: ${LOS_KAFKA_BOOTSTRAP_SERVERS}
+    properties:
+      # IAM authentication against Amazon MSK. No username, no password, no
+      # long-lived credential: the pod's IAM role is the credential, obtained
+      # through EKS Pod Identity.
+      security.protocol: SASL_SSL
+      sasl.mechanism: AWS_MSK_IAM
+      sasl.jaas.config: software.amazon.msk.auth.iam.IAMLoginModule required;
+      sasl.client.callback.handler.class: software.amazon.msk.auth.iam.IAMClientCallbackHandler
+
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${LOS_OAUTH2_ISSUER_URI}
+
+los:
+  environment: ${LOS_ENVIRONMENT}
+  security:
+    accepted-audiences: ${LOS_OAUTH2_AUDIENCES}
+
+management:
+  cloudwatch:
+    metrics:
+      export:
+        enabled: true
+        namespace: ${LOS_ENVIRONMENT}/LoanOrigination
+        step: PT1M
+  otlp:
+    tracing:
+      endpoint: ${LOS_OTLP_ENDPOINT}

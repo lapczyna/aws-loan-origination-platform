@@ -1,0 +1,21 @@
+# Integration-test profile for the audit service.
+
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    clean-disabled: true
+
+los:
+  environment: integration-test
+
+logging:
+  structured:
+    format:
+      console: ""
+  level:
+    root: WARN
+    com.example.los: DEBUG
+    org.testcontainers: WARN
+    com.github.dockerjava: WARN
