@@ -9,7 +9,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.example.los.application.adapter.out.document.DocumentStatusProjector;
+import com.example.los.application.adapter.out.persistence.DocumentStatusProjector;
 import com.example.los.application.usecase.port.ProcessedEventStore;
 import com.example.los.events.EventJson;
 import com.example.los.events.EventTypes;

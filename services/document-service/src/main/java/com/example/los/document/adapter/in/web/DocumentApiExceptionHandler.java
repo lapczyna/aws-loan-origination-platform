@@ -17,12 +17,12 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-import com.example.los.document.adapter.out.persistence.ConcurrentDocumentUpdate;
 import com.example.los.document.adapter.out.s3.ObjectStorageUnavailableException;
 import com.example.los.document.domain.model.DocumentNotFoundException;
 import com.example.los.document.domain.model.IllegalDocumentStateException;
 import com.example.los.document.domain.model.UploadVerificationFailedException;
 import com.example.los.document.observability.CorrelationId;
+import com.example.los.document.usecase.port.ConcurrentDocumentUpdate;
 
 /**
  * Translates exceptions into RFC 9457 Problem Details.

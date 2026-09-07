@@ -11,12 +11,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.example.los.workflow.adapter.out.checks.ResilientCheckInvoker;
 import com.example.los.workflow.domain.model.AssessmentPolicy;
 import com.example.los.workflow.domain.model.CheckState;
 import com.example.los.workflow.domain.model.WorkflowId;
 import com.example.los.workflow.domain.model.WorkflowInstance;
 import com.example.los.workflow.domain.model.WorkflowReasonCodes;
+import com.example.los.workflow.usecase.port.CheckExecutor;
 import com.example.los.workflow.usecase.port.ExternalCheckPort;
 import com.example.los.workflow.usecase.port.OutboxWriter;
 import com.example.los.workflow.usecase.port.PermanentCheckFailure;
@@ -62,7 +62,7 @@ public class AdvanceWorkflowsUseCase {
 
     private final WorkflowRepository workflows;
     private final OutboxWriter outbox;
-    private final ResilientCheckInvoker checks;
+    private final CheckExecutor checks;
     private final AssessmentPolicy policy;
     private final Clock clock;
 
@@ -73,7 +73,7 @@ public class AdvanceWorkflowsUseCase {
     public AdvanceWorkflowsUseCase(
             WorkflowRepository workflows,
             OutboxWriter outbox,
-            ResilientCheckInvoker checks,
+            CheckExecutor checks,
             AssessmentPolicy policy,
             Clock clock,
             @Value("${los.workflow.max-attempts:5}") int maxAttempts,
