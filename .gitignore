@@ -40,6 +40,14 @@ kubeconfig.*
 # --- Terraform --------------------------------------------------------------
 .terraform/
 .terraform.lock.hcl.bak
+
+# Provider lock files belong to the ROOT modules that own the provider
+# requirements -- the environments -- and are committed there, pinned for every
+# platform CI runs on. A lock file inside a reusable module is an artifact of
+# validating it standalone: the module does not choose the provider version, its
+# caller does, so committing one there would pin a version the caller never
+# asked for.
+infrastructure/terraform/modules/*/.terraform.lock.hcl
 *.tfstate
 *.tfstate.*
 *.tfplan

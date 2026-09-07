@@ -1,0 +1,78 @@
+# =============================================================================
+# Checkov configuration.
+#
+# SUPPRESSION POLICY
+# ------------------
+# Every suppression carries a written justification. A suppression without one
+# is not acceptable in review: silencing a scanner without understanding the
+# finding is how a real problem ships.
+#
+# MOST SUPPRESSIONS DO NOT LIVE HERE, DELIBERATELY. A skip in this file is
+# GLOBAL -- it silences the check for every resource in the repository, now and
+# in future. That is the wrong tool for "this one resource is a considered
+# exception", because it also hides the next genuine occurrence.
+#
+# So the default is an INLINE `# checkov:skip=<ID>:<reason>` comment on the
+# resource itself, and only checks that are inapplicable to the whole codebase
+# are listed below. The inline suppressions currently in the tree:
+#
+#   modules/api-gateway/main.tf
+#     CKV_AWS_120, CKV_AWS_225  response caching is off on purpose
+#     CKV2_AWS_51               no mutual TLS; JWT plus API key instead
+#     CKV2_AWS_31, CKV2_AWS_77  verified false positives (see below)
+#   modules/kms/main.tf
+#     CKV_AWS_109, CKV_AWS_111, CKV_AWS_356
+#                               key policy, not an identity policy
+#   environments/dev/main.tf
+#     CKV_AWS_157, CKV_AWS_293  development-only HA and deletion-protection
+#                               settings; production is still checked
+#
+# ON THE TWO FALSE POSITIVES: both were verified rather than assumed. Copying
+# the api-gateway module to a scratch directory and removing only the `count`
+# from the three WAFv2 resources makes both checks pass with no other change,
+# which shows the configuration is correct and checkov's graph engine simply
+# cannot follow a reference through a count-indexed resource. The count stays,
+# because the WAF has to remain optional.
+#
+# Findings that cannot be fixed are documented here and in
+# docs/security/scanning.md, never quietly ignored.
+# =============================================================================
+
+directory:
+  - infrastructure/terraform
+
+framework:
+  - terraform
+
+# Fail the build on any finding that is not explicitly skipped, here or inline.
+soft-fail: false
+
+skip-check:
+  # --- Globally inapplicable checks -----------------------------------------
+
+  # CKV_AWS_144: S3 cross-region replication.
+  # Not enabled anywhere. Replication is a disaster-recovery control with a real
+  # and continuous cost. For the documents bucket the recovery path is a
+  # re-upload by the applicant; for the audit bucket, durability comes from
+  # versioning and Object Lock rather than from a second region. Revisit if the
+  # recovery objective changes.
+  - CKV_AWS_144
+
+  # CKV2_AWS_62: S3 event notifications.
+  # Flagged on the server access-log bucket, which is supplied by the caller and
+  # is outside this repository's scope. The terminal bucket in a logging chain
+  # necessarily has neither logging nor notifications of its own -- logging a
+  # bucket into itself is an infinite loop, because every log write is an access
+  # that must be logged.
+  - CKV2_AWS_62
+
+  # CKV_AWS_338: CloudWatch log retention of at least one year.
+  # Application logs are retained for 30 days in production. Retaining logs that
+  # may contain incidental personal data for a year conflicts with data
+  # minimisation. The AUDIT TRAIL, not the application log, is the long-lived
+  # record, and it is held for seven years under Object Lock.
+  - CKV_AWS_338
+
+  # CKV_AWS_117: Lambda functions deployed inside a VPC.
+  # There are no Lambda functions in this platform.
+  - CKV_AWS_117

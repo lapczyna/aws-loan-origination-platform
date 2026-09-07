@@ -1,0 +1,25 @@
+# =============================================================================
+# Example variables. COPY to terraform.tfvars and edit.
+#
+# terraform.tfvars is GITIGNORED. It is where real values go, and they must
+# never be committed.
+#
+# READ docs/operations/cost.md BEFORE SETTING enable_deployment = true.
+# =============================================================================
+
+# Nothing is created while this is false.
+# enable_deployment = true
+
+# region    = "eu-west-1"
+# dr_region = "eu-central-1"
+
+# owner_tag       = "your-team-name"
+# cost_centre_tag = "your-cost-centre"
+
+# --- Cost guardrail ---
+# Strongly recommended before enabling the deployment. Both are required
+# together: the module refuses to create a budget with no subscriber.
+#
+# enable_budget              = true
+# budget_monthly_limit       = 500
+# budget_notification_emails = ["your-team-alias@your-domain.example"]

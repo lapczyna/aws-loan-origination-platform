@@ -7,7 +7,7 @@ output observed. Nothing here is aspirational.
 **No AWS resource has been created. The repository is private and has not been
 pushed to any remote.**
 
-Last updated: 2026-09-06
+Last updated: 2026-09-07
 
 ---
 
@@ -22,6 +22,7 @@ Last updated: 2026-09-06
 | Helm | 4.2.4 |
 | kubectl | 1.29.2 (client only; never connected to a cluster) |
 | gitleaks / kubeconform / tflint | 8.30.1 / 0.8.0 / 0.64.0, downloaded to a scratch directory outside the repository |
+| checkov | 3.3.8 |
 
 ---
 
@@ -33,15 +34,62 @@ Last updated: 2026-09-06
 | 1 | Repository baseline and parent build | Done |
 | 2 | Domain model and Application Service core | Done |
 | 3 | PostgreSQL migrations, idempotency, outbox, REST API | Done |
-| 4 | Kafka contracts and Workflow Service | Contracts done; workflow service not started |
-| 5 | Document Service and presigned S3 upload | Not started |
-| 6 | Audit Service | Not started |
-| 7 | Observability and safe logging | Partially done (see below) |
-| 8 | Docker and Docker Compose | Not started |
-| 9 | Kubernetes and Helm | Not started |
-| 10 | Terraform | Not started |
-| 11 | CI/CD and security scanning | Not started |
-| 12 | End-to-end verification and public-release review | Not started |
+| 4 | Kafka contracts and Workflow Service | Done |
+| 5 | Document Service and presigned S3 upload | Done |
+| 6 | Audit Service | Done |
+| 7 | Observability and safe logging | Done |
+| 8 | Docker and Docker Compose | Done |
+| 9 | Kubernetes and Helm | Done |
+| 10 | Terraform | Done |
+| 11 | CI/CD and security scanning | **Not started** |
+| 12 | End-to-end suite, documentation, public-release review | **Not started** |
+
+---
+
+## Verification, as actually run
+
+Every command below was executed on this machine and its output observed.
+
+```bash
+./mvnw clean verify            # 275 tests, 0 failures, 0 errors, 0 skipped
+scripts/validate-terraform.sh  # fmt + validate + tflint + checkov, exit 0
+scripts/validate-helm.sh       # helm lint + template + kubeconform, exit 0
+scripts/secret-scan.sh         # gitleaks, working tree and full history
+make local-up && make local-smoke-test && make local-down
+```
+
+### Test totals
+
+`./mvnw clean verify`, run 2026-09-07 with Docker running, so every
+Testcontainers integration test executed rather than being skipped.
+
+| Module | Unit | Integration |
+|---|---:|---:|
+| `shared/event-contracts` | 23 | — |
+| `services/application-service` | 122 | 26 |
+| `services/workflow-service` | 32 | 10 |
+| `services/document-service` | — | 11 |
+| `services/audit-service` | 11 | 9 |
+| `tests/architecture` | 31 | — |
+| **Total** | **219** | **56** |
+
+**275 tests, 0 failures, 0 errors, 0 skipped.**
+
+### Scanner results
+
+| Scanner | Result |
+|---|---|
+| gitleaks — working tree | no leaks found |
+| gitleaks — full history (8 commits) | no leaks found |
+| `terraform fmt -check -recursive` | clean |
+| `terraform validate` — dev, prod-example, uncalled modules | valid |
+| tflint | clean, exit 0 |
+| checkov | 296 passed, **0 failed**, 33 skipped |
+| `helm lint` / `helm template` / kubeconform | clean |
+
+Every checkov suppression carries a written justification, and most are inline
+on the resource rather than global, so the same check still fails elsewhere. The
+full triage is in [`docs/security/scanning.md`](docs/security/scanning.md).
 
 ---
 
@@ -73,134 +121,143 @@ Two compatibility problems were found and fixed here rather than at runtime:
    `commons-logging` artifact, so the Enforcer rule banning it had to be removed
    — it would have banned Spring itself.
 
+A third surfaced in Phase 3 and belongs with them: **Spring Boot 4 moved
+auto-configuration out of the aggregate starters into per-technology modules.**
+Depending on bare `flyway-core` compiles and then silently never runs a
+migration; `spring-kafka` compiles and then provides no `KafkaTemplate` bean.
+The services depend on `spring-boot-flyway` and `spring-boot-kafka` instead.
+
 ### Phase 2 — Domain model
 
 `services/application-service` domain layer, with no Spring, JPA or Jackson
-imports anywhere in `domain/`:
+imports anywhere in `domain/` — a rule now enforced by ArchUnit rather than by
+discipline.
 
-- `LoanApplication` aggregate: no setters; every state change is a named
-  business operation that checks its own preconditions and records a domain
-  event. The business version increments once per operation and is carried on
-  every event so consumers can detect out-of-order delivery.
-- `ApplicationStatus` state machine with the legal transitions declared once in
-  an exhaustive `switch`.
-- `ApplicantDetails` is the only type holding personal data. It is deliberately a
-  class and not a record, because a record's generated `toString()` would print a
-  name, an email address and a date of birth into any log statement that touched
-  it. Its `toString()` returns `ApplicantDetails[redacted]`.
-- `ApplicantReference` — an irreversible HMAC-SHA-256 pseudonym under a secret
-  pepper. The only applicant identifier that crosses a context boundary.
-- Value objects: `Money` (integer minor units, never floating point), `LoanTerm`,
-  `LoanRequest`, `Decision`, `ApplicationId` (RFC 9562 version 7 UUID, so
-  identifiers are unguessable but still index-friendly).
-- `ProductRules` — cheap local eligibility rules evaluated before any external
-  check is requested.
+- `LoanApplication` aggregate whose transitions are domain methods that refuse
+  an illegal move, not setters.
+- `ApplicationStatus` with an exhaustive switch declaring the legal transitions,
+  tested across the full 9×9 matrix.
+- `ApplicantDetails` is deliberately a class rather than a record, so it can
+  override `toString()` to return `ApplicantDetails[redacted]`. If it ever
+  reaches a log statement, an exception message or a debugger transcript,
+  nothing identifying is printed.
+- `ApplicantReference` is an irreversible HMAC-SHA-256 pseudonym under a pepper
+  read from a **file**, never from an environment variable or a property.
 
-### Phase 3 — Persistence, idempotency, outbox and the REST API
+### Phase 3 — Persistence, idempotency, outbox, REST API
 
-- Flyway migrations for the `application` schema: the aggregate, an append-only
-  version history, the idempotency ledger, the transactional outbox, the
-  de-duplication ledger, and an event-fed projection of document status.
-- Separate migration and runtime database roles. The runtime role's grants are
-  applied by a migration that no-ops when the role has not been bootstrapped, so
-  a developer machine still works while production stays least-privilege.
-- Hexagonal persistence: the aggregate and its JPA entity are separate types with
-  an explicit mapper, so no persistence annotation reaches the domain and no
-  entity reaches the API.
-- Transactional outbox with a `FOR UPDATE SKIP LOCKED` publisher, exponential
-  backoff with full jitter, and a terminal `FAILED` state that parks an event for
-  the replay runbook rather than dropping it.
-- Idempotent create and submit, keyed on `Idempotency-Key` plus a SHA-256
-  fingerprint of the canonicalised request body.
-- `/v1` REST API with RFC 9457 Problem Details, OAuth2 resource-server security
-  including audience validation, restrictive CORS defaults, and correlation
-  identifiers propagated from HTTP through to events.
+- Flyway migrations, one schema per service, with separate migration and runtime
+  database roles.
+- Transactional outbox claimed with `FOR UPDATE SKIP LOCKED`, exponential
+  backoff with full jitter, and a terminal `FAILED` state rather than an
+  unbounded retry.
+- Idempotency on `Idempotency-Key` plus a SHA-256 fingerprint of the canonical
+  request body: the same body replays the original result, a different body is a
+  409.
+- RFC 9457 Problem Details that never forward an exception message.
+- OAuth2 resource server with a `LazyIssuerJwtDecoder`, so an IdP blip cannot
+  stop a pod from starting.
 
-Four Spring Boot 4 behaviours were found the hard way and are worth recording:
+### Phase 4 — Event contracts and the Workflow Service
 
-1. **Auto-configuration moved into per-technology modules.** Depending on
-   `flyway-core` or `spring-kafka` alone puts the library on the classpath with no
-   auto-configuration at all — migrations silently never run, and there is no
-   `KafkaTemplate` bean. The fixes are `spring-boot-flyway` and `spring-boot-kafka`.
-2. **A record cannot be a JPA `@IdClass`.** The specification requires a public
-   class with a public no-argument constructor.
-3. **`CHAR(n)` columns fail Hibernate schema validation**, because PostgreSQL
-   reports them as `bpchar` while a `String` maps to `varchar`. `VARCHAR` is the
-   better choice anyway: `CHAR` blank-pads and compares with the padding.
-4. **The PostgreSQL JDBC driver cannot infer a SQL type for `java.time.Instant`**
-   bound to a native query. Entity mappings and JPQL handle it; native queries
-   need `OffsetDateTime`.
+- `shared/event-contracts`: a versioned envelope, a canonical Jackson 3 mapper,
+  and **nine frozen golden samples** that 23 compatibility tests replay. Removing
+  or renaming a required field fails the build.
+- The Workflow Service is a **durable state machine persisted in PostgreSQL**,
+  not a chain of synchronous HTTP calls. Work is claimed by lease with
+  `UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING id`.
+- Retries live in the durable schedule, not in an HTTP thread. Resilience4j
+  supplies a circuit breaker, a bounded thread-pool bulkhead and an explicit
+  timeout per check type.
+- `abandonCheck` records **no outcome**. "The bureau was down" must never be
+  readable as "the applicant failed".
 
-### Phase 4 (partial) — Event contracts
+### Phase 5 — Document Service
 
-`shared/event-contracts` with the versioned envelope, nine payload records across
-three bounded contexts, the shared vocabulary, and `EventJson` — the single
-canonical Jackson 3 mapping used by every producer and consumer.
+- Presigned S3 `PUT` bound to a content type, with a **separate presigner
+  endpoint** from the service's own S3 client endpoint — otherwise the URL is
+  signed for a route the client cannot reach.
+- Quarantine → accepted prefix migration; object keys are opaque and carry no
+  personal data.
+- `DocumentRejectionRecorder` runs in `REQUIRES_NEW`, because a rejection
+  recorded inside the transaction that then threw was rolled back with it.
 
-The compatibility suite replays nine frozen golden samples and asserts that each
-still deserialises, that a round trip loses no field, that a field added by a
-newer producer does not break an older consumer, that timestamps are ISO-8601
-strings, and that no payload declares a field whose name suggests personal data.
+### Phase 6 — Audit Service
 
-### Phase 7 (partial) — Observability and safe logging
+- Append-only, hash-chained records: SHA-256 over the canonical fields plus the
+  previous hash, `U+001F` as the field separator, summary keys sorted.
+- `AuditSummary` is an allow-list of 17 code-like keys with a 128-character
+  value limit. A rejection names the key and never the value.
+- `V2__append_only_grants.sql` grants `SELECT, INSERT` only. **Verified live**
+  that PostgreSQL refuses `UPDATE` and `DELETE` on `audit.audit_record`, and
+  that editing or deleting a row as a superuser breaks the chain detectably.
 
-- Structured JSON logging through Spring Boot 4's built-in support, so no
-  third-party encoder is needed and the container writes only to stdout.
-- Correlation identifiers: client-supplied values are validated against a
-  conservative pattern before they reach the MDC, so a caller cannot inject
-  newlines to forge log entries or park a stolen credential in the logs.
-- **No generic request/response logging filter anywhere.** Domain logging is
-  explicit and names the safe fields it emits.
-- Outbox gauges for backlog size, age of the oldest unpublished event, and the
-  permanently failed count.
-- `CapturedLogs` and `SensitiveMarkers` in `shared/test-support` give tests the
-  ability to assert that known synthetic sensitive values never reach the logging
-  pipeline. `ApplicationApiIT` uses them.
+### Phase 7 — Observability and safe logging
 
-Still missing from this phase: OpenTelemetry export wiring verified end to end,
-the CloudWatch dashboards and alarms (Terraform, phase 10), and business metrics
-beyond the outbox gauges.
+- Spring Boot 4's built-in structured JSON logging; no logstash encoder.
+- No generic request/response logging filter anywhere. Explicit safe-summary
+  objects instead, with a redaction layer as a second defence.
+- Log-capture tests assert that synthetic markers — a fake national ID, an email
+  address, a JWT, a presigned URL — never reach the log pipeline.
 
----
+### Phase 8 — Docker and Compose
 
-## Verified commands
+- Multi-stage builds on **digest-pinned** Temurin images, non-root UID 10001,
+  read-only root filesystem.
+- The healthcheck is a bash `/dev/tcp` probe, because the runtime image
+  deliberately contains no curl and no wget.
+- Compose runs PostgreSQL, Kafka in KRaft mode, LocalStack and a mock OIDC
+  issuer. `S3_SKIP_SIGNATURE_VALIDATION=0` is set explicitly — LocalStack
+  skips presigned-signature validation by default, which made two tests vacuous
+  until it was found.
+- `make local-smoke-test` drives the whole vertical slice and was run: an
+  application reached `APPROVED`, 16 audit records were written with an intact
+  chain, every outbox drained, and no personal data appeared in any log.
 
-Each of these was run in this session and its output observed.
+### Phase 9 — Kubernetes and Helm
 
-```bash
-./mvnw -v                                    # Maven 3.9.16, JDK 25.0.2
-./mvnw -B verify -Pfast                      # unit tests only, no Docker needed
-./mvnw -B verify -pl shared/event-contracts,shared/test-support,services/application-service -am
-                                             # full suite including Testcontainers
-gitleaks detect --no-git --source . --config .gitleaks.toml   # clean
-```
+- One chart templated over a `services` map, rather than four near-identical
+  charts.
+- Per-service ServiceAccount and IAM role; default-deny NetworkPolicies that
+  exclude `169.254.169.254`; Secrets Store CSI delivering **files**, not
+  Kubernetes Secrets.
+- `ingress.yaml` calls `fail` if the scheme is not `internal`, so an
+  internet-facing ingress cannot be produced by a values file.
+- Verified with `helm lint`, `helm template` and kubeconform. **Never against a
+  cluster.**
 
-Test totals at this point: **171 passing, 0 failing, 0 skipped.**
+### Phase 10 — Terraform
 
-| Suite | Tests | Result |
-|---|---:|---|
-| Event contract compatibility | 23 | pass |
-| Application domain (unit) | 122 | pass |
-| `OutboxGuaranteesIT` (real PostgreSQL + Kafka) | 9 | pass |
-| `ApplicationApiIT` (HTTP, security, privacy) | 17 | pass |
+Modules: `networking`, `kms`, `rds-postgresql`, `msk`, `s3-documents`,
+`s3-audit`, `ecr`, `cloudwatch`, `budgets`, `api-gateway`. Environments: `dev`
+and `prod-example`.
 
-`OutboxGuaranteesIT` proves, against real containers: an event is written in the
-same transaction as the state change; a rolled-back transaction leaves no event;
-the publisher marks a row published only after the broker acknowledges; a broker
-outage leaves events pending and publication resumes on recovery; an exhausted
-retry budget parks the event rather than dropping it; two concurrent publishers
-take disjoint batches; two concurrent submissions produce exactly one transition;
-every event carries a correlation identifier and a causal chain; and the
-partition key is always the application identifier.
+- `enable_deployment` defaults to **false**, so a plan produces no resources and
+  an apply creates nothing until someone deliberately opts in.
+- `enable_cross_region_dr_replica` defaults to **false**; it roughly doubles the
+  database bill.
+- No backend block is committed, so `terraform init -backend=false` validates
+  the configuration with no credentials and no network call.
+- HA and DR are treated as different things, and the difference is written down
+  where the code is: a Multi-AZ standby is synchronous and automatic; a
+  cross-region replica is asynchronous, manually promoted and one-way. Neither
+  is a backup.
 
-`ApplicationApiIT` proves: a repeated idempotency key with the same body replays
-the original result; the same key with a different body is a 409; formatting
-differences are not a conflict; four concurrent requests with one key create one
-application; submission is idempotent; validation errors name the field but never
-echo the value; error responses carry no stack trace, SQL or table name; expired
-tokens and tokens minted for another audience are refused; a partner client
-cannot reach the manual-review queue; and applicant personal data is neither
-returned by the API nor written to any log.
+Two real bugs were found by the scanners rather than by reading:
+
+1. **tflint** reported `project_tag` as declared but unused in the budgets
+   module. It was in fact used — inside `"user:Project${var.project_tag}"`,
+   where the escaping was wrong in a way that produced a cost filter matching
+   nothing, silently. Rewritten as
+   `format("user:Project%s%s", "$", var.project_tag)`.
+2. **checkov** found that the audit bucket had no server access logging while
+   the documents bucket did. "Who read the audit trail" is the one question the
+   audit trail cannot answer about itself.
+
+The checkov triage went from 25 failures to zero: seven were genuine gaps and
+were **fixed**; the rest are suppressed with written justifications, two of them
+as false positives that were *verified* by reproducing the pass in a scratch
+copy rather than assumed. See [`docs/security/scanning.md`](docs/security/scanning.md).
 
 ---
 
@@ -209,9 +266,29 @@ returned by the API nor written to any log.
 - The four external checks (KYC, AML, fraud, credit scoring) and the malware
   scanner are **simulations behind ports**. They are labelled as such in code and
   documentation. No real financial or security service is contacted.
+- **`docs/` is almost entirely missing.** Only `docs/security/scanning.md`
+  exists. The ADRs, runbooks, cost breakdown, threat model, OpenAPI document and
+  README diagrams are Phase 12 work, and files already in the tree link to them.
+  Those links are currently broken.
+- **`SECURITY.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` and `.github/` do not
+  exist yet.** There is no CI at all: every check listed above is run by hand
+  through the scripts in `scripts/`.
+- **`tests/end-to-end` is an empty module** — a POM and nothing else. The
+  end-to-end path has been exercised through `make local-smoke-test` against the
+  Compose stack, but not as an automated suite.
+- `tests/performance` and `tests/security` do not exist. The k6 scripts are
+  Phase 12 work.
+- Terraform modules named in the design but **not written**: `eks`,
+  `internal-load-balancer`, `secrets`, `iam`, `disaster-recovery`. Because
+  `eks` and `internal-load-balancer` are missing, the `api-gateway` module has
+  no environment that calls it; `scripts/validate-terraform.sh` validates
+  uncalled modules separately so that gap cannot rot unnoticed.
+- There is **no `environments/local`** for Terraform, deliberately. The local
+  environment is Docker Compose. A Terraform "local" environment that provisions
+  nothing would be a directory that has to be maintained and proves nothing.
 - Static analysis (SpotBugs) sits in an opt-in profile and has **not** been run
-  against JDK 25 bytecode yet. If it cannot read class file version 69 that will
-  be documented as unavailable rather than silently disabled.
+  against JDK 25 bytecode. If it cannot read class file version 69 that will be
+  documented as unavailable rather than silently disabled.
 - Spotless enforces imports, indentation and whitespace but not full AST
   formatting: google-java-format and palantir-java-format reach into javac
   internals not verified on JDK 25 here.
@@ -219,15 +296,24 @@ returned by the API nor written to any log.
   context. This can only delay a submission, never wrongly permit one, but it
   does mean a submission may be refused for a document that has in fact just been
   accepted. Documented in the migration that creates the table.
-- Only the application service exists. The workflow, document and audit services
-  have POMs and dependencies but no source yet.
+- Container image scanning and dependency vulnerability scanning have not been
+  run. Both are Phase 11 CI steps.
 
 ---
 
 ## Exact next step
 
-Phase 4: the Workflow Service — a durable state machine in PostgreSQL that
-consumes `application.submitted`, schedules the KYC, AML, fraud and credit checks
-through ports with configurable simulators, applies Resilience4j timeouts,
-bounded retries and circuit breakers to the synchronous calls, and publishes
-`workflow.completed` or `workflow.failed` through its own outbox.
+**Phase 11 — CI/CD and security scanning.** A pull-request workflow running
+everything the local scripts run (build, unit, integration, ArchUnit, format,
+dependency scan, gitleaks over full history, image build **without push**, image
+scan, SBOM, Terraform fmt/validate/tflint/checkov, Helm lint/template,
+kubeconform); least-privilege `permissions:` on every job; every third-party
+action pinned to a commit SHA with a version comment.
+
+Then the three workflows that exist but are **never executed here**: an ECR
+publish (OIDC, immutable digest), a Terraform plan that never applies, and a
+manual deploy gated on `workflow_dispatch`, a literal `DEPLOY` confirmation, a
+protected environment and required reviewers.
+
+Followed by `SECURITY.md`, the STRIDE threat model, data classification,
+retention, an incident-response outline and a secret-rotation runbook.
