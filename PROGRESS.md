@@ -54,6 +54,7 @@ Last updated: 2026-09-08
 Every command below was executed on this machine and its output observed.
 
 ```bash
+make release-check             # THE WHOLE GATE, exit 0 (see below)
 ./mvnw clean verify            # 293 tests, 0 failures, 0 errors, 0 skipped
 scripts/validate-terraform.sh  # fmt + validate + tflint + checkov, exit 0
 scripts/validate-helm.sh       # helm lint + template + kubeconform, exit 0
@@ -68,9 +69,17 @@ npx @redocly/cli@1.34.3 lint docs/api/openapi.yaml
 npx @mermaid-js/mermaid-cli@11.4.2   # all 8 README diagrams rendered
 ```
 
-**GNU make is not installed on this machine.** The Makefile is a convenience
-wrapper over exactly the commands above, and its targets have not themselves
-been executed here. The underlying commands have.
+`make release-check` was run end to end and **exits 0**. It chains format-check,
+verify, tf-validate, helm-validate, openapi-validate, ci-validate, secret-scan
+and the documentation link check.
+
+GNU make is not installed on this machine; a pinned GNU Make 4.4.1 was extracted
+from the MSYS2 package repository into the session's scratch directory, as the
+other scanners already are. **It is not in the repository**, and nothing was
+installed to the system.
+
+Running the target rather than its steps individually caught a real defect that
+the individual runs had missed — see the Phase 12 notes.
 
 ### Test totals
 
@@ -378,6 +387,15 @@ had never been committed. Nothing failed, because the build reads the working
 tree and only git was blind. Every pattern in that section is now anchored, and
 the files were scanned with gitleaks before being committed.
 
+**Running the gate found a defect the individual steps had not.** Each step of
+`make release-check` had been run separately and passed; running the target
+itself failed at `openapi-validate` with two Redocly errors. On a `List<String>`,
+`@Schema(allowableValues = ...)` puts the enum on the **array** rather than on
+its items, producing `type: array` next to `enum: [...]` — invalid OpenAPI, and
+generated silently. Fixed with `@ArraySchema`. The lesson is the ordinary one:
+the last lint had been run before that type was added, so "every step passes" was
+true of an earlier tree and not of the committed one.
+
 **Documentation.** The link checker went from 16 missing documents to none:
 
 - `docs/api/openapi.yaml` — OpenAPI 3.1, valid under Redocly with **zero
@@ -465,17 +483,15 @@ the files were scanned with gitleaks before being committed.
 
 ## What is left
 
-All twelve phases are complete. What remains is not implementation:
+All twelve phases are complete and `make release-check` passes. What remains is
+not implementation:
 
-1. **Run `make release-check` end to end** on a machine with GNU make, and
-   record the result. Each step has been run individually; the target itself has
-   not, because make is not installed here.
-2. **The human security review** in
+1. **The human security review** in
    [`docs/public-release-checklist.md`](docs/public-release-checklist.md). The
    scanners find what somebody thought to write a pattern for; a person reading
    the tree and the history finds what nobody anticipated. That review has not
    happened, and it is the gate before this repository could be made public.
-3. **Nothing has been deployed, and nothing should be** without reading
+2. **Nothing has been deployed, and nothing should be** without reading
    [`docs/operations/cost.md`](docs/operations/cost.md) first. The `prod-example`
    environment costs several hundred dollars a month before a single application
    is submitted, and six of its seven largest line items are billed whether or

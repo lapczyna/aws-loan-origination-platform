@@ -253,10 +253,10 @@ components:
           type: string
         missingDocumentTypes:
           description: "The document CATEGORIES that are missing. Never a document's contents, and never a filename."
-          enum:
-          - PROOF_OF_IDENTITY
-          - PROOF_OF_INCOME
           items:
+            enum:
+            - PROOF_OF_IDENTITY
+            - PROOF_OF_INCOME
             type: string
           type: array
       type: object
