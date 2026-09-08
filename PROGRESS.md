@@ -7,7 +7,7 @@ output observed. Nothing here is aspirational.
 **No AWS resource has been created. The repository is private and has not been
 pushed to any remote.**
 
-Last updated: 2026-09-07
+Last updated: 2026-09-08
 
 ---
 
@@ -45,7 +45,7 @@ Last updated: 2026-09-07
 | 9 | Kubernetes and Helm | Done |
 | 10 | Terraform | Done |
 | 11 | CI/CD and security scanning | Done |
-| 12 | End-to-end suite, documentation, public-release review | **Not started** |
+| 12 | End-to-end suite, documentation, public-release review | Done |
 
 ---
 
@@ -54,7 +54,7 @@ Last updated: 2026-09-07
 Every command below was executed on this machine and its output observed.
 
 ```bash
-./mvnw clean verify            # 275 tests, 0 failures, 0 errors, 0 skipped
+./mvnw clean verify            # 291 tests, 0 failures, 0 errors, 0 skipped
 scripts/validate-terraform.sh  # fmt + validate + tflint + checkov, exit 0
 scripts/validate-helm.sh       # helm lint + template + kubeconform, exit 0
 scripts/secret-scan.sh         # gitleaks, working tree and full history
@@ -62,7 +62,10 @@ docker compose -f deploy/compose/docker-compose.yml up -d
 scripts/local-smoke-test.sh
 docker compose -f deploy/compose/docker-compose.yml down
 scripts/check-action-pins.sh  # every GitHub Action pinned to a commit SHA
+scripts/check-doc-links.sh    # every referenced document exists
 actionlint                     # all four workflows lint-clean
+npx @redocly/cli@1.34.3 lint docs/api/openapi.yaml
+npx @mermaid-js/mermaid-cli@11.4.2   # all 8 README diagrams rendered
 ```
 
 **GNU make is not installed on this machine.** The Makefile is a convenience
@@ -82,21 +85,27 @@ Testcontainers integration test executed rather than being skipped.
 | `services/document-service` | — | 11 |
 | `services/audit-service` | 11 | 9 |
 | `tests/architecture` | 31 | — |
-| **Total** | **219** | **56** |
+| `tests/end-to-end` | — | 16 |
+| **Total** | **219** | **72** |
 
-**275 tests, 0 failures, 0 errors, 0 skipped.**
+**291 tests, 0 failures, 0 errors, 0 skipped.**
 
 ### Scanner results
 
 | Scanner | Result |
 |---|---|
 | gitleaks — working tree | no leaks found |
-| gitleaks — full history (8 commits) | no leaks found |
+| gitleaks — full history | no leaks found |
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint | clean, exit 0 |
 | checkov | 296 passed, **0 failed**, 33 skipped |
 | `helm lint` / `helm template` / kubeconform | clean |
+| actionlint 1.7.7 — all four workflows | clean |
+| `scripts/check-action-pins.sh` | every action SHA-pinned |
+| `scripts/check-doc-links.sh` | every referenced document exists |
+| Redocly 1.34.3 — OpenAPI 3.1 | valid |
+| mermaid-cli 11.4.2 — 8 README diagrams | all render |
 
 Every checkov suppression carries a written justification, and most are inline
 on the resource rather than global, so the same check still fails elsewhere. The
@@ -328,6 +337,68 @@ opt-in pre-commit configuration whose first hook is gitleaks.
 
 ---
 
+### Phase 12 — End-to-end suite, documentation, release review
+
+**The end-to-end suite: 16 scenarios, all passing.** The four services run as
+four separate operating-system processes launched from their real executable
+jars, against shared PostgreSQL, Kafka and LocalStack containers. Real HTTP,
+real Kafka delivery, real outbox draining, real presigned uploads with no
+credentials, real Flyway migrations, real token validation. Nothing passes
+between services as a Java object.
+
+| Class | Covers |
+|---|---|
+| `LoanOriginationJourneyIT` | Draft, two presigned uploads, scan, projection, submit, assessment, decision, outbox drain, audit chain, no personal data anywhere |
+| `SubmissionSemanticsIT` | Repeated idempotency key, key reused for another application, six concurrent submissions, missing mandatory document, abandoned upload, editing after submission |
+| `AssessmentOutcomesIT` | Business rejection, inconclusive to manual review and a reviewer's decision, transient failure that recovers, permanent failure, credit score below threshold, credit score in the review band |
+| `EventDeliveryIT` | Duplicate event delivery, an outcome redelivered after the decision, and a **broker outage** — the Kafka container is paused mid-submission, the event is held in the outbox, and publication resumes on recovery |
+
+Four bugs in the tests themselves, found by running them rather than reading
+them, and each worth recording:
+
+- The happy path asserted `APPROVED` for a **randomly generated** applicant. The
+  simulated credit score derives from the applicant reference and the policy
+  bands it, so a random applicant approves roughly half the time — a coin flip
+  that had already passed twice. Three applicants were computed from that
+  derivation so each lands in a known band.
+- `TRUNCATE` between tests **deadlocked** against the services' pollers: it needs
+  an AccessExclusiveLock on every table while they hold AccessShareLocks.
+  PostgreSQL resolved it exactly as it should. Now `DELETE`, with a lock timeout
+  and a retry.
+- Three assertions raced the events they depended on. One passed in isolation and
+  failed only in the full run.
+- A workflow event's `aggregate_id` is the **workflow** id; the application id is
+  the partition key.
+
+**A `.gitignore` bug found by the suite.** An unanchored `out/` pattern, meant
+for an IDE output directory, matched the hexagonal `adapter/out/` directories:
+58 source files — every persistence, S3, messaging and external-check adapter —
+had never been committed. Nothing failed, because the build reads the working
+tree and only git was blind. Every pattern in that section is now anchored, and
+the files were scanned with gitleaks before being committed.
+
+**Documentation.** The link checker went from 16 missing documents to none:
+
+- `docs/api/openapi.yaml` — OpenAPI 3.1, valid under Redocly. One suppressed
+  rule, with a justification in `redocly.yaml`.
+- 11 alarm runbooks, each written for the person the alarm woke: what it means,
+  what it does **not** mean, first checks, likely causes, and what not to do.
+- `docs/operations/cost.md`, `terraform-state-bootstrap.md`,
+  `database-bootstrap.md`.
+- `docs/public-release-checklist.md`.
+- **15 ADRs** plus a template and an index, each recording what the decision
+  cost as well as what it bought.
+- A README architecture section with **8 Mermaid diagrams**, every one verified
+  by rendering it — which caught a real error: `call` is a reserved keyword in
+  Mermaid flowcharts, so the retry diagram would have shown a parse error
+  instead of a picture.
+- `tests/performance` — two k6 scripts, deliberately not run by default and not
+  in CI, because a load test on a shared runner measures the runner.
+- `scripts/local-token.sh`, extracted so the performance README's instructions
+  actually work.
+
+---
+
 ## Known limitations
 
 - The four external checks (KYC, AML, fraud, credit scoring) and the malware
@@ -337,19 +408,19 @@ opt-in pre-commit configuration whose first hook is gitleaks.
   under actionlint, but the repository has no remote, so GitHub Actions has
   never run a job. "The YAML is valid and the same commands pass locally" is a
   weaker claim than "the pipeline is green", and only the weaker one is made.
-- **`docs/` is still incomplete.** Present: `docs/security/` (scanning,
-  threat model, data classification, incident response) and
-  `docs/operations/runbooks/secret-rotation.md`. Missing, and linked to from
-  files already in the tree: the ADRs, the remaining eight runbooks,
-  `docs/operations/cost.md`, `docs/operations/terraform-state-bootstrap.md`,
-  `docs/api/openapi.yaml`, `docs/public-release-checklist.md`. **Those links are
-  currently broken**, and `scripts/check-doc-links.sh` reports exactly which:
-  16 referenced documents do not exist. It runs as part of `make release-check`
-  — the gate before public release, which is correctly not passing yet — rather
-  than in the pull-request workflow, because a check that is always red is a
-  check people learn to ignore.
+- **The OpenAPI document is hand-written, not generated from the code.** It
+  was written against the actual controllers and DTOs and is valid OpenAPI 3.1,
+  but nothing enforces that it stays in step with them. springdoc is a
+  dependency and could generate it; reconciling a generated document with the
+  hand-written commentary is unfinished work.
+- **The k6 scripts have never been run against anything.** They are excluded from
+  the build and from CI on purpose, and their thresholds are therefore guesses
+  rather than measurements.
 - **Trivy and the dependency review have never run**, because CI has never run.
   No container image in this repository has been vulnerability-scanned.
+- **The Compose stack has not been re-run since Phase 8.** The end-to-end suite
+  covers the same journey against the real jars, but the images and the Compose
+  wiring were last exercised then.
 - The IAM roles the workflows assume **do not exist**, and their trust policies
   are described in comments rather than written as Terraform. A trust policy
   scoped to the repository but not the ref would let any branch assume the role;
@@ -386,24 +457,22 @@ opt-in pre-commit configuration whose first hook is gitleaks.
 
 ---
 
-## Exact next step
+## What is left
 
-**Phase 12 — end-to-end suite, documentation, public-release review.**
+All twelve phases are complete. What remains is not implementation:
 
-1. `tests/end-to-end`, currently an empty module: the full happy path plus a
-   repeated idempotency key, the same key with a different payload, concurrent
-   submission, Kafka outage and recovery, a transient external failure, a
-   permanent rejection, a manual-review decision, a duplicate event, an
-   out-of-order event, a rejected document and a missing mandatory document.
-2. `docs/api/openapi.yaml` (OpenAPI 3.1) — the pull-request workflow already
-   has a job waiting for it, which currently reports the file's absence rather
-   than passing silently.
-3. The documentation the tree already links to and does not have: 12+ ADRs, the
-   remaining runbooks, `docs/operations/cost.md`,
-   `docs/operations/terraform-state-bootstrap.md`, and a README with the
-   architecture diagrams.
-4. `tests/performance` k6 scripts, not run by default.
-5. `docs/public-release-checklist.md` and a final full-history gitleaks scan.
+1. **Run `make release-check` end to end** on a machine with GNU make, and
+   record the result. Each step has been run individually; the target itself has
+   not, because make is not installed here.
+2. **The human security review** in
+   [`docs/public-release-checklist.md`](docs/public-release-checklist.md). The
+   scanners find what somebody thought to write a pattern for; a person reading
+   the tree and the history finds what nobody anticipated. That review has not
+   happened, and it is the gate before this repository could be made public.
+3. **Nothing has been deployed, and nothing should be** without reading
+   [`docs/operations/cost.md`](docs/operations/cost.md) first. The `prod-example`
+   environment costs several hundred dollars a month before a single application
+   is submitted, and six of its seven largest line items are billed whether or
+   not anyone uses it.
 
-The broken documentation links are the most visible gap: several files written
-in phases 9 to 11 reference documents that do not exist yet.
+The repository is private, has no remote, and has never been pushed.

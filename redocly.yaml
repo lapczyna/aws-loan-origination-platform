@@ -1,0 +1,23 @@
+# =============================================================================
+# Redocly configuration for the OpenAPI document.
+#
+# SUPPRESSION POLICY, the same one .checkov.yaml states: every rule turned off
+# below carries a written justification. Silencing a linter without
+# understanding the finding is how a real problem ships.
+# =============================================================================
+
+extends:
+  - recommended
+
+rules:
+  # no-server-example.com: "Server url should not point to example.com".
+  #
+  # Correct advice for a published API, and deliberately not followed here. This
+  # repository has never been deployed and must never contain a real hostname:
+  # a committed domain names an organisation and gives an attacker somewhere to
+  # start. example.com is reserved by RFC 2606 precisely so it can be used as a
+  # placeholder that resolves to nothing anyone owns.
+  #
+  # Turn this back on when there is a real deployment and a real domain, which
+  # is the point at which the rule starts protecting something.
+  no-server-example.com: off

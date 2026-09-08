@@ -124,7 +124,7 @@ helm-validate: ## Lint and render the Helm charts, then validate the manifests
 
 .PHONY: openapi-validate
 openapi-validate: ## Validate the OpenAPI 3.1 document
-	npx --yes @redocly/cli@1.34.2 lint docs/api/openapi.yaml
+	npx --yes @redocly/cli@1.34.3 lint docs/api/openapi.yaml
 
 # -----------------------------------------------------------------------------
 # Security
