@@ -55,6 +55,9 @@ Every command below was executed on this machine and its output observed.
 
 ```bash
 make release-check             # THE WHOLE GATE, exit 0 (see below)
+make docker-build              # all four images built from current source
+make local-up                  # every container reported healthy
+make local-smoke-test          # full journey through the Compose stack, exit 0
 ./mvnw clean verify            # 293 tests, 0 failures, 0 errors, 0 skipped
 scripts/validate-terraform.sh  # fmt + validate + tflint + checkov, exit 0
 scripts/validate-helm.sh       # helm lint + template + kubeconform, exit 0
@@ -387,7 +390,17 @@ had never been committed. Nothing failed, because the build reads the working
 tree and only git was blind. Every pattern in that section is now anchored, and
 the files were scanned with gitleaks before being committed.
 
-**Running the gate found a defect the individual steps had not.** Each step of
+**Running `make docker-build` found a second latent defect.** The Makefile
+derived the project version by taking the *third* `<version>` element in
+`pom.xml` by position. That was the project's version when it was written; a
+dependency added above it later shifted the match, so the variable resolved to
+the literal string `${awssdk.version}` and bash refused to expand it. The build
+had never been run through make since, so nothing noticed. The extraction is now
+anchored on `</parent>`, and two guards fail the Makefile immediately if the
+value is empty or still contains a dollar sign — a positional match into XML is
+a bug with a delay on it.
+
+**Running the release gate found a defect the individual steps had not.** Each step of
 `make release-check` had been run separately and passed; running the target
 itself failed at `openapi-validate` with two Redocly errors. On a `List<String>`,
 `@Schema(allowableValues = ...)` puts the enum on the **array** rather than on
@@ -442,9 +455,12 @@ true of an earlier tree and not of the committed one.
   rather than measurements.
 - **Trivy and the dependency review have never run**, because CI has never run.
   No container image in this repository has been vulnerability-scanned.
-- **The Compose stack has not been re-run since Phase 8.** The end-to-end suite
-  covers the same journey against the real jars, but the images and the Compose
-  wiring were last exercised then.
+- The Compose stack **was** re-run on 2026-09-08 against images rebuilt from
+  current source: all four containers healthy, and `make local-smoke-test`
+  drove the full journey to APPROVED with 16 audit records, an intact hash chain
+  and no personal data. What is still not covered there is a failure path — the
+  smoke test is a happy path by design, and the failure modes are covered by the
+  end-to-end suite against the jars rather than the images.
 - The IAM roles the workflows assume **do not exist**, and their trust policies
   are described in comments rather than written as Terraform. A trust policy
   scoped to the repository but not the ref would let any branch assume the role;

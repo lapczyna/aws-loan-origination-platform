@@ -16,8 +16,26 @@ MVN            := ./mvnw
 COMPOSE_FILE   := deploy/compose/docker-compose.yml
 COMPOSE        := docker compose -f $(COMPOSE_FILE)
 SERVICES       := application-service document-service workflow-service audit-service
-VERSION        := $(shell sed -n 's|.*<version>\(.*\)</version>.*|\1|p' pom.xml | sed -n 3p)
+# The project's own version: the FIRST <version> after </parent>.
+#
+# Anchored on </parent> rather than taken by position. The previous form picked
+# the third <version> in the file, which was the project's until a dependency
+# was added above it -- after which `make docker-build` passed the literal
+# string ${awssdk.version} to bash and failed with "bad substitution". A
+# positional match into XML is a bug with a delay on it.
+VERSION        := $(shell sed -n '/<\/parent>/,$$ s|.*<version>\(.*\)</version>.*|\1|p' pom.xml | head -1)
 GIT_SHA        := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+
+# Fail immediately rather than handing something unusable to docker build. An
+# unresolved property still contains a dollar sign; an empty value means the
+# extraction broke entirely. Either way, stopping here is far kinder than a
+# shell error four minutes into an image build.
+ifeq ($(strip $(VERSION)),)
+$(error Could not determine the project version from pom.xml)
+endif
+ifneq ($(findstring $$,$(VERSION)),)
+$(error Project version resolved to the unexpanded property '$(VERSION)'. The extraction in this Makefile is wrong.)
+endif
 
 # -----------------------------------------------------------------------------
 # Help
