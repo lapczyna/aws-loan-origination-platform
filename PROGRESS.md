@@ -4,8 +4,20 @@ This file is the honest record of what exists, what was actually run, and what
 does not exist yet. Anything described as verified was executed locally and its
 output observed. Nothing here is aspirational.
 
-**No AWS resource has been created. The repository is private and has not been
-pushed to any remote.**
+**No AWS resource has been created. Nothing has ever been pushed.**
+
+A git remote *is* configured — `origin`, pointing at a GitHub URL — and has been
+since 2026-09-06. Earlier revisions of this file and several commit messages said
+"no remote", which was wrong. What is true, and checkable, is that nothing has
+been pushed or fetched through it: there are no remote-tracking branches, no
+`.git/refs/remotes`, no `FETCH_HEAD`, and no branch has an upstream. An
+unauthenticated read of the GitHub API returns 404, so the repository is either
+private or does not exist yet.
+
+That distinction matters more than it sounds. With a remote configured, a single
+`git push` publishes everything, and the
+[public-release checklist](docs/public-release-checklist.md) has not been
+completed.
 
 Last updated: 2026-09-08
 
