@@ -31,7 +31,7 @@ through on 2026-09-08.
 
 | Section | Result |
 |---|---|
-| 1. Secrets | **Pass.** gitleaks clean on the working tree and all 22 commits. No `.env`, kubeconfig, `.tfstate`, `.pem`, `.p12` or `.jks` ever added. `local-dev-keys/` ignored and never committed. |
+| 1. Secrets | **Pass.** gitleaks clean on the working tree and the complete history. No `.env`, kubeconfig, `.tfstate`, `.pem`, `.p12` or `.jks` ever added. `local-dev-keys/` ignored and never committed. |
 | 2. Identifiers and personal data | **Pass.** Every account id is twelve zeroes, every ARN a placeholder, every email an `example.com` address, every domain reserved. The phone number is in Ofcom's fictional range. |
 | 3. History | **Pass**, after correction — see below. No file was added and later deleted. No ticket references or internal hostnames. |
 | 4. Licensing | **Pass.** Apache-2.0, no vendored binaries, CI denies AGPL-3.0 and GPL-3.0. |
@@ -43,10 +43,11 @@ through on 2026-09-08.
 ### Two history rewrites, recorded because they happened
 
 Both were explicitly requested, both were taken with a full backup bundle first,
-and both were verified to change **messages only** — the tree hash of all 22
-commits is byte-identical before and after each.
+and both were verified to change **messages only** — every commit's tree hash
+was byte-identical before and after each. Both rewrites covered the 22 commits
+that existed at the time.
 
-1. The `Claude-Session:` trailer was removed from all 22 messages.
+1. The `Claude-Session:` trailer was removed from every message.
 2. Thirteen messages claimed the repository had "no remote". They now say
    "nothing has been pushed", which is true. The commit that documents the
    correction still discusses the original wording, deliberately.
@@ -59,7 +60,7 @@ would not have been.
 
 ### Decisions left to the owner
 
-- **Commit authorship** carries a real name and email on all 22 commits. Normal
+- **Commit authorship** carries a real name and email on every commit. Normal
   for a personal repository, and irreversible in practice once published.
 - **Making the repository public** is a human act. No script, workflow or agent
   in this repository changes visibility, pushes, or creates a remote repository.
