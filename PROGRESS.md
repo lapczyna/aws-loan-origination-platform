@@ -111,7 +111,7 @@ Testcontainers integration test executed rather than being skipped.
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint | clean, exit 0 |
-| checkov | 446 passed, **0 failed**, 36 skipped |
+| checkov | 492 passed, **0 failed**, 37 skipped |
 | `helm lint` / `helm template` / kubeconform | clean |
 | actionlint 1.7.7 — all four workflows | clean |
 | `scripts/check-action-pins.sh` | every action SHA-pinned |
@@ -470,8 +470,18 @@ true of an earlier tree and not of the committed one.
   Compose stack, but not as an automated suite.
 - `tests/performance` and `tests/security` do not exist. The k6 scripts are
   Phase 12 work.
-- Terraform modules named in the design but **not written**: `secrets` and
-  `disaster-recovery`. Every module that *does* exist has a caller.
+- **Every Terraform module the design named now exists**, and every one is
+  called by both environments.
+- **No secret has a rotation function.** The `secrets` module supports one and
+  none is written: Secrets Manager rotation needs a Lambda that knows how to
+  change the credential at its source, which is real work rather than a flag.
+  The RDS master password is the exception and is already rotated by AWS. The
+  applicant pepper is deliberately never rotated on a schedule — doing so would
+  corrupt data rather than protect it.
+- **After a first apply the secrets exist and are empty**, so every pod that
+  mounts one fails to start. That is the intended failure: a placeholder value
+  that let the platform start would be a working system with a known credential
+  in it.
 - **The roles for cluster add-ons do not exist** — the AWS Load Balancer
   Controller, the cluster autoscaler, the EBS CSI driver, the Secrets Store CSI
   driver. They are cluster infrastructure rather than this platform's services

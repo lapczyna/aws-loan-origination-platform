@@ -70,6 +70,8 @@ account, or a hard-coded name. Environments supply those.
 | `ecr` | Immutable tags, scan on push | yes |
 | `eks` | Private-endpoint cluster, access entries rather than aws-auth, IRSA, and nodes whose pods cannot reach instance metadata | yes |
 | `cloudwatch` | Log groups and the full alarm set, including outbox age, consumer lag and stuck applications | yes |
+| `secrets` | Secret containers whose values Terraform never learns, with per-secret resource policies | yes |
+| `disaster-recovery` | AWS Backup vault, lock and plan — protects against a MISTAKE, which replication does not | yes |
 | `budgets` | Optional cost guardrail; refuses to create anything without both an amount and an address | yes |
 | `api-gateway` | REST API behind WAF, VPC Link to the internal NLB | yes |
 | `internal-load-balancer` | Internal NLB for the VPC Link, forwarding to the ALB the Helm chart creates | yes |
@@ -96,10 +98,10 @@ which trades the hop for a component to operate.
 
 ### Modules named in the design but not yet written
 
-`secrets` and `disaster-recovery`. Listed here rather than omitted, so the gap
-is visible.
+**None.** Every module the design named now exists and is called by both
+environments.
 
-The roles for cluster ADD-ONS are also absent — the AWS Load Balancer
+The roles for cluster ADD-ONS are still absent — the AWS Load Balancer
 Controller, the cluster autoscaler, the EBS CSI driver, the Secrets Store CSI
 driver. Those are cluster infrastructure rather than this platform's services,
 and they use IRSA against the OIDC provider the `eks` module creates. Without
@@ -132,7 +134,7 @@ Last run 2026-09-07, via `scripts/validate-terraform.sh`:
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint 0.64.0 | clean, exit 0 |
-| checkov 3.3.8 | **446 passed, 0 failed, 36 skipped** |
+| checkov 3.3.8 | **492 passed, 0 failed, 37 skipped** |
 
 Every suppression carries a written justification, and most are inline on the
 resource rather than global, so the next genuine occurrence of the same check

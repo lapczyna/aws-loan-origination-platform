@@ -144,3 +144,14 @@ variable "cognito_user_pool_arns" {
   type        = list(string)
   default     = ["arn:aws:cognito-idp:eu-west-1:000000000000:userpool/eu-west-1_EXAMPLE"]
 }
+
+variable "secret_administrator_role_arns" {
+  description = <<-EOT
+    Roles permitted to read every secret, for placing and rotating values.
+
+    PLACEHOLDER, and it names no real account. The values are placed out of band
+    by a human or a rotation function, and this is who that human is.
+  EOT
+  type        = list(string)
+  default     = ["arn:aws:iam::000000000000:role/platform-engineering-admin"]
+}

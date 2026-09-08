@@ -161,3 +161,33 @@ variable "cognito_user_pool_arns" {
   type        = list(string)
   default     = ["arn:aws:cognito-idp:eu-west-1:000000000000:userpool/eu-west-1_EXAMPLE"]
 }
+
+variable "secret_administrator_role_arns" {
+  description = <<-EOT
+    Roles permitted to read every secret, for placing and rotating values.
+
+    PLACEHOLDER, and it names no real account. The values are placed out of band
+    by a human or a rotation function, and this is who that human is.
+  EOT
+  type        = list(string)
+  default     = ["arn:aws:iam::000000000000:role/platform-engineering-admin"]
+}
+
+variable "enable_cross_region_backup_copy" {
+  description = <<-EOT
+    Copy every recovery point to a vault in another region.
+
+    FALSE BY DEFAULT. It is the control that survives losing the primary region
+    entirely, and it pays for the transfer AND for storing a second copy of
+    everything. Requires dr_backup_kms_key_arn, because a KMS key never leaves
+    the region it was created in.
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "dr_backup_kms_key_arn" {
+  description = "Key encrypting the DR-region backup vault. Required when enable_cross_region_backup_copy is true."
+  type        = string
+  default     = null
+}

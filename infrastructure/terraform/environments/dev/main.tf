@@ -456,6 +456,65 @@ module "ecr" {
 }
 
 # -----------------------------------------------------------------------------
+# Secrets.
+#
+# CONTAINERS, NOT VALUES. Terraform never learns what these hold: a secret whose
+# value Terraform knows is a secret in the state file. The values are placed out
+# of band, so after a first apply the secrets exist and are empty and every pod
+# that mounts one fails to start -- which is the correct failure.
+# -----------------------------------------------------------------------------
+module "secrets" {
+  source = "../../modules/secrets"
+  count  = local.enabled
+
+  environment = var.environment
+  account_id  = local.account_id
+  kms_key_arn = module.kms_database[0].key_arn
+
+  # Each secret's resource policy names the one service allowed to read it, so a
+  # mistakenly broad identity policy elsewhere does not open it.
+  service_role_arns              = module.iam[0].role_arns
+  secret_administrator_role_arns = var.secret_administrator_role_arns
+}
+
+# -----------------------------------------------------------------------------
+# Backups.
+#
+# NOT the RDS replica, which is in the database module and protects against a
+# region failing. This protects against a MISTAKE: both forms of replication copy
+# a mistaken DELETE as faithfully as a legitimate one, and in seconds. Only a
+# backup goes back to before it.
+#
+# COST: storage per gigabyte-month, and cross-region copy pays for the transfer
+# and for a second copy of everything.
+# -----------------------------------------------------------------------------
+module "backups" {
+  source = "../../modules/disaster-recovery"
+  count  = local.enabled
+
+  providers = {
+    aws.dr = aws.dr
+  }
+
+  environment = var.environment
+  kms_key_arn = module.kms_database[0].key_arn
+
+  # Backup failures arrive wherever the platform's other alarms already go.
+  notification_topic_arn = module.cloudwatch[0].alarm_topic_arn
+
+  # Short retention and no lock in development: the point here is that the
+  # mechanism works, not that a year of history survives.
+  enable_vault_lock              = false
+  daily_retention_days           = 7
+  weekly_retention_days          = 30
+  weekly_cold_storage_after_days = 90
+
+  # A second copy of a development environment protects nothing anyone would
+  # miss, and pays transfer plus storage for it.
+  enable_cross_region_copy = false
+}
+
+# -----------------------------------------------------------------------------
 # Cost guardrail.
 #
 # Off by default, and refuses to create anything without both an explicit amount
