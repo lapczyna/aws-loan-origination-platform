@@ -111,7 +111,7 @@ Testcontainers integration test executed rather than being skipped.
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint | clean, exit 0 |
-| checkov | 492 passed, **0 failed**, 37 skipped |
+| checkov | 533 passed, **0 failed**, 37 skipped |
 | `helm lint` / `helm template` / kubeconform | clean |
 | actionlint 1.7.7 — all four workflows | clean |
 | `scripts/check-action-pins.sh` | every action SHA-pinned |
@@ -465,11 +465,12 @@ true of an earlier tree and not of the committed one.
   are described in comments rather than written as Terraform. A trust policy
   scoped to the repository but not the ref would let any branch assume the role;
   that is the review that matters most when they become real.
-- **`tests/end-to-end` is an empty module** — a POM and nothing else. The
-  end-to-end path has been exercised through `scripts/local-smoke-test.sh` against the
-  Compose stack, but not as an automated suite.
-- `tests/performance` and `tests/security` do not exist. The k6 scripts are
-  Phase 12 work.
+- **`tests/security` does not exist.** The security assertions live in the
+  service tests instead, where the data is: the log-capture tests that assert
+  synthetic markers never reach the log pipeline, the API tests that assert
+  errors never echo a value, and the audit tests that assert PostgreSQL refuses
+  UPDATE and DELETE. A separate module would either duplicate those or hold
+  weaker versions of them.
 - **Every Terraform module the design named now exists**, and every one is
   called by both environments.
 - **No secret has a rotation function.** The `secrets` module supports one and
@@ -482,12 +483,16 @@ true of an earlier tree and not of the committed one.
   mounts one fails to start. That is the intended failure: a placeholder value
   that let the platform start would be a working system with a known credential
   in it.
-- **The roles for cluster add-ons do not exist** — the AWS Load Balancer
-  Controller, the cluster autoscaler, the EBS CSI driver, the Secrets Store CSI
-  driver. They are cluster infrastructure rather than this platform's services
-  and would use IRSA against the OIDC provider the `eks` module creates. Without
-  the load balancer controller the chart's Ingress produces no ALB, so the
-  internal load balancer's target stays empty.
+- The **AWS Load Balancer Controller's IAM policy is not in this repository**,
+  deliberately. Its role, and the roles for the cluster autoscaler and the EBS
+  CSI driver, are created by the `eks` module with IRSA. The autoscaler's policy
+  is written here because it is short enough to get right; the EBS driver uses
+  the AWS-managed policy. The controller's upstream document runs to several
+  hundred lines and changes between releases, so it is supplied by the caller
+  from a pinned release rather than transcribed — a subtly wrong copy would fail
+  to create a load balancer with an error naming an action nobody can find.
+  Until it is supplied the role exists and can do nothing, which is the safe
+  direction.
 - **The chart mounts a database password while the RDS module enables IAM
   database authentication.** Both paths are real and only one should survive a
   deployment. The `iam` module grants both — `rds-db:connect` scoped to the
@@ -516,9 +521,6 @@ true of an earlier tree and not of the committed one.
   context. This can only delay a submission, never wrongly permit one, but it
   does mean a submission may be refused for a document that has in fact just been
   accepted. Documented in the migration that creates the table.
-- The Makefile targets have **not been executed on this machine** — GNU make
-  is not installed here. Each target is a thin wrapper over a script or a Maven
-  invocation, and those were run directly.
 - `CODEOWNERS.example` is deliberately not active. Renaming it to `CODEOWNERS`
   does nothing on its own: it only has teeth when the branch protection rule for
   `main` requires review from code owners.

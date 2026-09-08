@@ -290,3 +290,44 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+# -----------------------------------------------------------------------------
+# Cluster add-on identities
+# -----------------------------------------------------------------------------
+variable "enable_addon_roles" {
+  description = <<-EOT
+    Create IRSA roles for the cluster add-ons.
+
+    The load balancer controller is the one that matters: without it the Helm
+    chart's Ingress produces no ALB, and the internal NLB's target group stays
+    empty -- which is to say nothing reaches the platform at all.
+
+    The Secrets Store CSI driver deliberately gets no role: its AWS provider uses
+    the POD's identity to fetch a secret, which is why the iam module grants each
+    service its own secret and no other.
+  EOT
+  type        = bool
+  default     = true
+}
+
+variable "load_balancer_controller_policy_json" {
+  description = <<-EOT
+    The AWS Load Balancer Controller's IAM policy document.
+
+    NOT WRITTEN IN THIS REPOSITORY, deliberately. The upstream document runs to
+    several hundred lines and changes between releases; transcribing it from
+    memory or a blog post is how a subtly wrong policy ends up committed, and the
+    controller then fails to create a load balancer with an error naming an
+    action nobody can find.
+
+    Take it from docs/install/iam_policy.json in the aws-load-balancer-controller
+    repository, at the tag you are installing, and pass it in --
+    file("iam_policy.json") is enough.
+
+    Null leaves the role created but empty, so the service account annotation has
+    something to point at and the controller can do nothing. That is the safe
+    direction to be wrong in.
+  EOT
+  type        = string
+  default     = null
+}

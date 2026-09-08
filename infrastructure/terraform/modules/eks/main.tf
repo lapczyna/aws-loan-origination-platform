@@ -501,6 +501,190 @@ resource "aws_eks_node_group" "this" {
   }
 }
 
+# =============================================================================
+# Cluster add-on identities.
+#
+# These are CLUSTER INFRASTRUCTURE, not this platform's services. The services
+# get their roles from the iam module and are bound by EKS Pod Identity; the
+# add-ons are bound by IRSA against the OIDC provider above, because they are
+# installed into kube-system by their own charts rather than by this platform's.
+#
+# THE LOAD BALANCER CONTROLLER IS THE ONE THAT MATTERS. Without it the chart's
+# Ingress produces no ALB, and the internal NLB's target group stays empty --
+# which is to say, nothing reaches the platform at all.
+#
+# The Secrets Store CSI driver deliberately has no role here: its AWS provider
+# uses the POD's identity to fetch a secret, which is why the iam module grants
+# each service its own secret and no other.
+# =============================================================================
+
+locals {
+  oidc_issuer_host = replace(aws_eks_cluster.this.identity[0].oidc[0].issuer, "https://", "")
+}
+
+# -----------------------------------------------------------------------------
+# The IRSA trust policy, per service account.
+#
+# Both conditions matter. The `sub` binds the role to one service account in one
+# namespace. The `aud` is the one people omit: without it, a token minted for a
+# different audience by the same issuer would satisfy the trust policy.
+# -----------------------------------------------------------------------------
+data "aws_iam_policy_document" "addon_assume_role" {
+  for_each = var.enable_addon_roles ? toset(["aws-load-balancer-controller", "cluster-autoscaler", "ebs-csi-controller-sa"]) : toset([])
+
+  statement {
+    effect  = "Allow"
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.this.arn]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_issuer_host}:sub"
+      values   = ["system:serviceaccount:kube-system:${each.value}"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "${local.oidc_issuer_host}:aud"
+      values   = ["sts.amazonaws.com"]
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# AWS Load Balancer Controller.
+#
+# THE POLICY IS NOT WRITTEN HERE, DELIBERATELY. The controller's IAM document is
+# published by the upstream project, runs to several hundred lines, and changes
+# between releases. Transcribing it from memory or from a blog post is how a
+# subtly wrong policy ends up in a repository: the controller then fails to
+# create a load balancer with an error that names an action nobody can find.
+#
+# Fetch it from the controller release you are installing --
+# docs/install/iam_policy.json in the aws-load-balancer-controller repository, at
+# a pinned tag -- and pass it in. The role is created either way, so the service
+# account annotation has something to point at; without a policy it can do
+# nothing, which is the safe direction.
+# -----------------------------------------------------------------------------
+resource "aws_iam_role" "load_balancer_controller" {
+  count = var.enable_addon_roles ? 1 : 0
+
+  name               = "${local.cluster_name}-aws-load-balancer-controller"
+  description        = "AWS Load Balancer Controller. Creates the internal ALB the platform's Ingress declares."
+  assume_role_policy = data.aws_iam_policy_document.addon_assume_role["aws-load-balancer-controller"].json
+
+  tags = merge(local.common_tags, { Addon = "aws-load-balancer-controller" })
+}
+
+resource "aws_iam_policy" "load_balancer_controller" {
+  count = var.enable_addon_roles && var.load_balancer_controller_policy_json != null ? 1 : 0
+
+  name        = "${local.cluster_name}-aws-load-balancer-controller"
+  description = "Upstream AWS Load Balancer Controller policy, supplied by the caller at a pinned release."
+  policy      = var.load_balancer_controller_policy_json
+
+  tags = local.common_tags
+}
+
+resource "aws_iam_role_policy_attachment" "load_balancer_controller" {
+  count = var.enable_addon_roles && var.load_balancer_controller_policy_json != null ? 1 : 0
+
+  role       = aws_iam_role.load_balancer_controller[0].name
+  policy_arn = aws_iam_policy.load_balancer_controller[0].arn
+}
+
+# -----------------------------------------------------------------------------
+# Cluster autoscaler.
+#
+# Small enough to write correctly, unlike the controller's. The node group's
+# desired_size is in ignore_changes precisely because this is what owns it.
+# -----------------------------------------------------------------------------
+data "aws_iam_policy_document" "cluster_autoscaler" {
+  count = var.enable_addon_roles ? 1 : 0
+
+  # Read-only discovery. These actions have no resource-level permissions, so
+  # "*" is the only thing AWS accepts here -- it is not a widened grant.
+  statement {
+    sid    = "DiscoverScalingGroups"
+    effect = "Allow"
+    actions = [
+      "autoscaling:DescribeAutoScalingGroups",
+      "autoscaling:DescribeAutoScalingInstances",
+      "autoscaling:DescribeLaunchConfigurations",
+      "autoscaling:DescribeScalingActivities",
+      "autoscaling:DescribeTags",
+      "ec2:DescribeInstanceTypes",
+      "ec2:DescribeLaunchTemplateVersions",
+    ]
+    resources = ["*"]
+  }
+
+  # The actions that actually change something, scoped BY TAG to this cluster's
+  # groups. Without the condition the autoscaler could scale or terminate
+  # instances in any Auto Scaling group in the account.
+  statement {
+    sid    = "ScaleThisClustersGroupsOnly"
+    effect = "Allow"
+    actions = [
+      "autoscaling:SetDesiredCapacity",
+      "autoscaling:TerminateInstanceInAutoScalingGroup",
+    ]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "autoscaling:ResourceTag/kubernetes.io/cluster/${local.cluster_name}"
+      values   = ["owned"]
+    }
+  }
+}
+
+resource "aws_iam_role" "cluster_autoscaler" {
+  count = var.enable_addon_roles ? 1 : 0
+
+  name               = "${local.cluster_name}-cluster-autoscaler"
+  description        = "Cluster autoscaler. Owns the node group's desired size."
+  assume_role_policy = data.aws_iam_policy_document.addon_assume_role["cluster-autoscaler"].json
+
+  tags = merge(local.common_tags, { Addon = "cluster-autoscaler" })
+}
+
+resource "aws_iam_role_policy" "cluster_autoscaler" {
+  count = var.enable_addon_roles ? 1 : 0
+
+  name   = "${local.cluster_name}-cluster-autoscaler"
+  role   = aws_iam_role.cluster_autoscaler[0].id
+  policy = data.aws_iam_policy_document.cluster_autoscaler[0].json
+}
+
+# -----------------------------------------------------------------------------
+# EBS CSI driver.
+#
+# An AWS-managed policy exists for this one and is kept current by AWS, which is
+# strictly better than a copy that goes stale here. Its ARN is wired into the
+# add-on below, so the driver uses this role rather than the node's.
+# -----------------------------------------------------------------------------
+resource "aws_iam_role" "ebs_csi_driver" {
+  count = var.enable_addon_roles ? 1 : 0
+
+  name               = "${local.cluster_name}-ebs-csi-driver"
+  description        = "EBS CSI driver, for PersistentVolumes."
+  assume_role_policy = data.aws_iam_policy_document.addon_assume_role["ebs-csi-controller-sa"].json
+
+  tags = merge(local.common_tags, { Addon = "aws-ebs-csi-driver" })
+}
+
+resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
+  count = var.enable_addon_roles ? 1 : 0
+
+  role       = aws_iam_role.ebs_csi_driver[0].name
+  policy_arn = "arn:${var.aws_partition}:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
+}
+
 # -----------------------------------------------------------------------------
 # Add-ons.
 #
@@ -517,6 +701,12 @@ resource "aws_eks_addon" "this" {
   cluster_name  = aws_eks_cluster.this.name
   addon_name    = each.key
   addon_version = each.value
+
+  # Only the EBS CSI driver needs its own identity; the others use the node's.
+  # Without this the driver falls back to the node role, which deliberately
+  # carries no volume permissions -- and PersistentVolumeClaims then fail with an
+  # authorisation error that looks like a driver bug.
+  service_account_role_arn = each.key == "aws-ebs-csi-driver" && var.enable_addon_roles ? aws_iam_role.ebs_csi_driver[0].arn : null
 
   # OVERWRITE, not NONE: a self-managed CoreDNS installed before the add-on
   # existed would otherwise block every future update, and the failure appears

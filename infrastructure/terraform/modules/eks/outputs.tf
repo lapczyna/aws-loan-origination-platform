@@ -58,3 +58,17 @@ output "cluster_log_group_name" {
   description = "Control plane log group, including the audit log."
   value       = aws_cloudwatch_log_group.cluster.name
 }
+
+output "addon_role_arns" {
+  description = <<-EOT
+    Add-on name to IRSA role ARN, for annotating the add-on charts' service
+    accounts in kube-system.
+
+    Empty when enable_addon_roles is false.
+  EOT
+  value = var.enable_addon_roles ? {
+    "aws-load-balancer-controller" = aws_iam_role.load_balancer_controller[0].arn
+    "cluster-autoscaler"           = aws_iam_role.cluster_autoscaler[0].arn
+    "ebs-csi-controller-sa"        = aws_iam_role.ebs_csi_driver[0].arn
+  } : {}
+}

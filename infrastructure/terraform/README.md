@@ -101,12 +101,15 @@ which trades the hop for a component to operate.
 **None.** Every module the design named now exists and is called by both
 environments.
 
-The roles for cluster ADD-ONS are still absent — the AWS Load Balancer
-Controller, the cluster autoscaler, the EBS CSI driver, the Secrets Store CSI
-driver. Those are cluster infrastructure rather than this platform's services,
-and they use IRSA against the OIDC provider the `eks` module creates. Without
-them the chart's Ingress produces no ALB, so the load balancer's target stays
-empty.
+The cluster ADD-ON roles are created by the `eks` module using IRSA, separately
+from the per-service roles the `iam` module creates with Pod Identity — add-ons
+are cluster infrastructure, services are this platform's. The Secrets Store CSI
+driver deliberately gets no role: its AWS provider uses the pod's identity, which
+is why each service is granted its own secret and no other.
+
+The load balancer controller's own IAM policy is **not** in this repository. The
+upstream document is several hundred lines and changes between releases, so it is
+supplied by the caller from a pinned release rather than transcribed.
 
 ### HA is not DR
 
@@ -134,7 +137,7 @@ Last run 2026-09-07, via `scripts/validate-terraform.sh`:
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint 0.64.0 | clean, exit 0 |
-| checkov 3.3.8 | **492 passed, 0 failed, 37 skipped** |
+| checkov 3.3.8 | **533 passed, 0 failed, 37 skipped** |
 
 Every suppression carries a written justification, and most are inline on the
 resource rather than global, so the next genuine occurrence of the same check
