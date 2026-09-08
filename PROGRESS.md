@@ -7,12 +7,12 @@ output observed. Nothing here is aspirational.
 **No AWS resource has been created. Nothing has ever been pushed.**
 
 A git remote *is* configured — `origin`, pointing at a GitHub URL — and has been
-since 2026-09-06. Earlier revisions of this file and several commit messages said
-"no remote", which was wrong. What is true, and checkable, is that nothing has
-been pushed or fetched through it: there are no remote-tracking branches, no
-`.git/refs/remotes`, no `FETCH_HEAD`, and no branch has an upstream. An
-unauthenticated read of the GitHub API returns 404, so the repository is either
-private or does not exist yet.
+since 2026-09-06. This file and thirteen commit messages previously said "no
+remote", which was wrong; both have been corrected. What is true, and checkable,
+is that nothing has been pushed or fetched through it: there are no
+remote-tracking branches, no `.git/refs/remotes`, no `FETCH_HEAD`, and no branch
+has an upstream. An unauthenticated read of the GitHub API returns 404, so the
+repository is either private or does not exist yet.
 
 That distinction matters more than it sounds. With a remote configured, a single
 `git push` publishes everything, and the
@@ -20,6 +20,49 @@ That distinction matters more than it sounds. With a remote configured, a single
 completed.
 
 Last updated: 2026-09-08
+
+---
+
+## Public-release review
+
+`make release-check` exits 0, and the checklist in
+[`docs/public-release-checklist.md`](docs/public-release-checklist.md) was worked
+through on 2026-09-08.
+
+| Section | Result |
+|---|---|
+| 1. Secrets | **Pass.** gitleaks clean on the working tree and all 22 commits. No `.env`, kubeconfig, `.tfstate`, `.pem`, `.p12` or `.jks` ever added. `local-dev-keys/` ignored and never committed. |
+| 2. Identifiers and personal data | **Pass.** Every account id is twelve zeroes, every ARN a placeholder, every email an `example.com` address, every domain reserved. The phone number is in Ofcom's fictional range. |
+| 3. History | **Pass**, after correction — see below. No file was added and later deleted. No ticket references or internal hostnames. |
+| 4. Licensing | **Pass.** Apache-2.0, no vendored binaries, CI denies AGPL-3.0 and GPL-3.0. |
+| 5. The claims this repository makes | **Pass.** "Never deployed" appears in the README, `SECURITY.md` and this file; all four workflows state they have never executed; the test count here matches the surefire reports exactly. |
+| 6. Automated checks | **Pass.** `make release-check`, exit 0. |
+| 7. Repository settings | **Not applicable yet.** Secret scanning, push protection, branch protection and required reviewers are GitHub settings. They matter *after* publishing, and the deploy workflow's real gate lives in them rather than in its YAML. |
+| 8. **A human security review** | **NOT DONE.** It requires someone who is not the author. This is the outstanding gate. |
+
+### Two history rewrites, recorded because they happened
+
+Both were explicitly requested, both were taken with a full backup bundle first,
+and both were verified to change **messages only** — the tree hash of all 22
+commits is byte-identical before and after each.
+
+1. The `Claude-Session:` trailer was removed from all 22 messages.
+2. Thirteen messages claimed the repository had "no remote". They now say
+   "nothing has been pushed", which is true. The commit that documents the
+   correction still discusses the original wording, deliberately.
+
+`git-filter-repo` was used rather than `filter-branch`, matching the guidance in
+[the secret-rotation runbook](docs/operations/runbooks/secret-rotation.md).
+Rewriting was cheap here only because nothing had ever been pushed: no clone, no
+external reference and no CI run depended on the old hashes. After a push it
+would not have been.
+
+### Decisions left to the owner
+
+- **Commit authorship** carries a real name and email on all 22 commits. Normal
+  for a personal repository, and irreversible in practice once published.
+- **Making the repository public** is a human act. No script, workflow or agent
+  in this repository changes visibility, pushes, or creates a remote repository.
 
 ---
 
@@ -452,7 +495,7 @@ true of an earlier tree and not of the committed one.
   scanner are **simulations behind ports**. They are labelled as such in code and
   documentation. No real financial or security service is contacted.
 - **No CI has ever executed.** All four workflows exist and are lint-clean
-  under actionlint, but the repository has no remote, so GitHub Actions has
+  under actionlint, but nothing has ever been pushed, so GitHub Actions has
   never run a job. "The YAML is valid and the same commands pass locally" is a
   weaker claim than "the pipeline is green", and only the weaker one is made.
 - The OpenAPI document is **generated from the running services** and committed,
@@ -540,15 +583,24 @@ true of an earlier tree and not of the committed one.
 All twelve phases are complete and `make release-check` passes. What remains is
 not implementation:
 
-1. **The human security review** in
-   [`docs/public-release-checklist.md`](docs/public-release-checklist.md). The
-   scanners find what somebody thought to write a pattern for; a person reading
-   the tree and the history finds what nobody anticipated. That review has not
-   happened, and it is the gate before this repository could be made public.
+1. **The human security review**, section 8 of
+   [`docs/public-release-checklist.md`](docs/public-release-checklist.md).
+   Sections 1 to 6 pass; section 7 applies only after publishing. Section 8
+   needs someone who is not the author, because scanners find what somebody
+   thought to write a pattern for and this is the check for everything else.
+
+   The three highest-value things for that reviewer to read: the allowlist in
+   `.gitleaks.toml`, because an allowlist is where a real secret would hide; the
+   full diff, for anything resembling a hostname, a person or an internal
+   system; and the claims in this file, which have needed correcting three times
+   already — a stale entry twice, and one outright false statement about the
+   remote.
 2. **Nothing has been deployed, and nothing should be** without reading
    [`docs/operations/cost.md`](docs/operations/cost.md) first. The `prod-example`
    environment costs several hundred dollars a month before a single application
    is submitted, and six of its seven largest line items are billed whether or
    not anyone uses it.
 
-The repository is private, has no remote, and has never been pushed.
+Nothing has ever been pushed. A remote is configured, so publishing is one
+`git push` away — which is the reason the review above is worth completing
+first.

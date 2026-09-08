@@ -1,7 +1,7 @@
 # =============================================================================
 # Pull request checks.
 #
-# THIS WORKFLOW HAS NEVER RUN. The repository has no remote, so GitHub Actions
+# THIS WORKFLOW HAS NEVER RUN. Nothing has ever been pushed, so GitHub Actions
 # has never executed a single job here. Every check it performs was run locally
 # through the equivalent Makefile target, and the workflow is lint-clean under
 # actionlint 1.7.7 -- but "the YAML is valid and the same commands pass on a

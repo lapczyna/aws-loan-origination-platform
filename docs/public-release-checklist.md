@@ -1,6 +1,7 @@
 # Public release checklist
 
-The repository is **private** and has never been pushed to any remote. This is
+Nothing has ever been pushed. A remote *is* configured, so publishing is one
+`git push` away, which is why this list exists. This is
 what must be true before that changes.
 
 > Making a repository public is **irreversible in practice**. Within minutes it

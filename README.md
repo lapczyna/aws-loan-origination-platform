@@ -343,7 +343,7 @@ already link to them, and `scripts/check-doc-links.sh` reports exactly which.
 ## Continuous integration
 
 Four workflows in [`.github/workflows/`](.github/workflows/), **none of which
-has ever executed** — the repository has no remote. Every third-party action is
+has ever executed** — nothing has ever been pushed. Every third-party action is
 pinned to a commit SHA, enforced by
 [`scripts/check-action-pins.sh`](scripts/check-action-pins.sh).
 

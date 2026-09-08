@@ -7,7 +7,7 @@
 # scoped to the repository, so an unmaintained action is a supply-chain path,
 # not merely stale.
 #
-# THIS HAS NEVER RUN. The repository has no remote, so Dependabot has never
+# THIS HAS NEVER RUN. Nothing has ever been pushed, so Dependabot has never
 # opened a pull request here.
 # =============================================================================
 
