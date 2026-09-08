@@ -2,6 +2,8 @@ package com.example.los.application.adapter.in.web.dto;
 
 import java.time.Instant;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 import com.example.los.application.domain.model.LoanApplication;
 
 /**
@@ -12,9 +14,12 @@ import com.example.los.application.domain.model.LoanApplication;
  * to transfer, or be trusted with, the whole application on every poll.
  */
 public record ApplicationStatusResponse(
-        String applicationId,
-        String status,
-        boolean terminal,
+        @Schema(format = "uuid")
+                String applicationId,
+        @Schema(allowableValues = {"DRAFT", "SUBMITTED", "VALIDATING", "CHECKS_IN_PROGRESS", "MANUAL_REVIEW", "APPROVED", "REJECTED", "FAILED", "CANCELLED"})
+                String status,
+        @Schema(description = "Whether the status can still change. **Stop polling when this is true.**")
+                boolean terminal,
         String decisionType,
         String reasonCode,
         long version,

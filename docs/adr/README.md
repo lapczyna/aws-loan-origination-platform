@@ -27,6 +27,7 @@ change a decision: write a new one and mark the old superseded.
 | [0013](0013-secrets-as-files.md) | Secrets reach pods as files, not environment variables | Accepted |
 | [0014](0014-end-to-end-tests-as-separate-processes.md) | The end-to-end suite runs the services as separate processes | Accepted |
 | [0015](0015-single-helm-chart-over-a-services-map.md) | One Helm chart templated over a services map | Accepted |
+| [0016](0016-openapi-generated-from-the-code.md) | The OpenAPI document is generated from the code, and committed | Accepted |
 
 ## The two most consequential
 

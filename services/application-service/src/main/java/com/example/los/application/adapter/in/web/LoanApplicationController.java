@@ -6,6 +6,12 @@ import java.util.Currency;
 
 import jakarta.validation.Valid;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -23,6 +29,9 @@ import com.example.los.application.adapter.in.web.dto.ApplicationResponse;
 import com.example.los.application.adapter.in.web.dto.ApplicationStatusResponse;
 import com.example.los.application.adapter.in.web.dto.CreateApplicationRequest;
 import com.example.los.application.adapter.in.web.dto.LoanRequestPayload;
+import com.example.los.application.adapter.in.web.dto.MissingDocumentsProblem;
+import com.example.los.application.adapter.in.web.dto.ProblemResponse;
+import com.example.los.application.adapter.in.web.dto.StateTransitionProblem;
 import com.example.los.application.domain.model.ApplicantDetails;
 import com.example.los.application.domain.model.ApplicationId;
 import com.example.los.application.domain.model.LoanApplication;
@@ -49,6 +58,7 @@ import com.example.los.application.usecase.service.SubmitApplicationUseCase;
  */
 @RestController
 @RequestMapping("/v1/applications")
+@Tag(name = "Applications")
 class LoanApplicationController {
 
     private static final String OPERATION_CREATE = "create-application";
@@ -81,8 +91,34 @@ class LoanApplicationController {
      */
     @PostMapping
     @PreAuthorize("hasAuthority('SCOPE_applications:write')")
+    @Operation(
+            summary = "Create a draft application",
+            description = """
+                    Creates the application in `DRAFT`. Nothing is assessed until it is \
+                    submitted, and it cannot be submitted until every mandatory document \
+                    has been uploaded and accepted.
+                    """)
+    @ApiResponse(
+            responseCode = "201",
+            description = "Created, or replayed. A replay carries `Idempotent-Replay: true` "
+                    + "and is the original response, not a new application.",
+            content = @Content(schema = @Schema(implementation = ApplicationResponse.class)))
+    @ApiResponse(responseCode = "400", description = "The request failed validation.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
+    @ApiResponse(responseCode = "401", description = "No token, or a token that is expired or "
+            + "minted for another audience.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
+    @ApiResponse(responseCode = "403", description = "The token lacks `applications:write`.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
+    @ApiResponse(
+            responseCode = "409",
+            description = "The `Idempotency-Key` was already used for a different request, "
+                    + "or the original is still in flight.",
+            content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
     ResponseEntity<Object> createDraft(
-            @RequestHeader(value = IdempotentRequestExecutor.HEADER, required = false) String idempotencyKey,
+            @Parameter(
+                            description = "A client-generated key, unique per logical operation. "
+                                    + "Reuse it when retrying the SAME request; never reuse it for a different one.",
+                            example = "3f8c1b6e-9a2d-4c7f-8f10-2b5d9a1c4e77")
+                    @RequestHeader(value = IdempotentRequestExecutor.HEADER, required = false)
+                    String idempotencyKey,
             @Valid @RequestBody CreateApplicationRequest request) {
 
         String correlationId = CorrelationId.current();
@@ -98,6 +134,19 @@ class LoanApplicationController {
     /** Replaces the content of a draft. Refused once the application is submitted. */
     @PutMapping("/{applicationId}/draft")
     @PreAuthorize("hasAuthority('SCOPE_applications:write')")
+    @Operation(
+            summary = "Replace the contents of a draft",
+            description = """
+                    Refused once the application has been submitted. Changing the amount \
+                    after submission would mean the assessment ran against figures nobody \
+                    submitted.
+                    """)
+    @ApiResponse(responseCode = "200", description = "The updated draft.")
+    @ApiResponse(
+            responseCode = "409",
+            description = "The application is no longer a draft. The body names the current "
+                    + "and attempted states.",
+            content = @Content(schema = @Schema(implementation = StateTransitionProblem.class)))
     ApplicationResponse updateDraft(
             @PathVariable String applicationId, @Valid @RequestBody CreateApplicationRequest request) {
 
@@ -122,9 +171,35 @@ class LoanApplicationController {
      */
     @PostMapping("/{applicationId}/submit")
     @PreAuthorize("hasAuthority('SCOPE_applications:write')")
+    @Operation(
+            summary = "Submit an application for assessment",
+            description = """
+                    Starts the assessment. Returns **202 Accepted**, not 200: the response \
+                    says the request was accepted, not that a decision was reached. Poll \
+                    `/status` for the outcome.
+
+                    There is no request body. The path identifier is what the idempotency \
+                    fingerprint is taken over, so reusing a key against a different \
+                    application is a conflict rather than a silent replay of the first \
+                    application's result — which would tell a client its second application \
+                    had been submitted when it had not.
+                    """)
+    @ApiResponse(
+            responseCode = "202",
+            description = "Accepted for assessment, or replayed.",
+            content = @Content(schema = @Schema(implementation = ApplicationResponse.class)))
+    @ApiResponse(responseCode = "404", description = "No such application.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
+    @ApiResponse(responseCode = "409", description = "Idempotency key conflict.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
+    @ApiResponse(
+            responseCode = "422",
+            description = "A mandatory document has not been uploaded and accepted. The body "
+                    + "names the missing CATEGORIES, never a document's contents.",
+            content = @Content(schema = @Schema(implementation = MissingDocumentsProblem.class)))
     ResponseEntity<Object> submit(
             @PathVariable String applicationId,
-            @RequestHeader(value = IdempotentRequestExecutor.HEADER, required = false) String idempotencyKey) {
+            @Parameter(description = "See the create operation.")
+                    @RequestHeader(value = IdempotentRequestExecutor.HEADER, required = false)
+                    String idempotencyKey) {
 
         ApplicationId id = ApplicationId.of(applicationId);
         String correlationId = CorrelationId.current();
@@ -141,6 +216,19 @@ class LoanApplicationController {
 
     @GetMapping("/{applicationId}")
     @PreAuthorize("hasAuthority('SCOPE_applications:read')")
+    @Operation(
+            summary = "Retrieve an application",
+            description = """
+                    The full representation. It identifies the applicant by pseudonym and \
+                    initials, never by the values that were supplied.
+                    """)
+    @ApiResponse(responseCode = "200", description = "The application.")
+    @ApiResponse(
+            responseCode = "404",
+            description = "No such application. Deliberately indistinguishable from "
+                    + "\"exists but is not yours\": telling the two apart lets a caller "
+                    + "enumerate which identifiers exist.",
+            content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
     ApplicationResponse getApplication(@PathVariable String applicationId) {
         return ApplicationResponse.from(queries.getById(ApplicationId.of(applicationId)));
     }
@@ -154,6 +242,17 @@ class LoanApplicationController {
      */
     @GetMapping("/{applicationId}/status")
     @PreAuthorize("hasAuthority('SCOPE_applications:read')")
+    @Operation(
+            summary = "The current status",
+            description = """
+                    Deliberately small and separate from the full representation. Status \
+                    polling is the highest-volume read on the platform, and a client waiting \
+                    for a decision should not transfer the whole application on every poll.
+
+                    Stop polling when `terminal` is true.
+                    """)
+    @ApiResponse(responseCode = "200", description = "The current status.")
+    @ApiResponse(responseCode = "404", description = "No such application.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
     ApplicationStatusResponse getStatus(@PathVariable String applicationId) {
         return ApplicationStatusResponse.from(queries.getById(ApplicationId.of(applicationId)));
     }

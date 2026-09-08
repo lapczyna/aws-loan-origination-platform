@@ -110,6 +110,17 @@
       <scope>test</scope>
     </dependency>
 
+    <!--
+      Writing the generated OpenAPI document as YAML. Jackson's YAML dataformat
+      rather than snakeyaml directly, so the document is serialised by the same
+      library that parsed it and round-trips deterministically.
+    -->
+    <dependency>
+      <groupId>tools.jackson.dataformat</groupId>
+      <artifactId>jackson-dataformat-yaml</artifactId>
+      <scope>test</scope>
+    </dependency>
+
     <!-- Reading events straight off the topics, to assert what was published. -->
     <dependency>
       <groupId>org.apache.kafka</groupId>

@@ -354,5 +354,15 @@ management:
       endpoint: ${LOS_OTLP_ENDPOINT}
 
 springdoc:
+  # The generated contract is committed at docs/api/openapi.yaml and is the
+  # published one. Serving it from the running service as well would put an
+  # endpoint in production that enumerates every route, every parameter and
+  # every schema for whoever asks -- and it is reachable by any principal with
+  # a valid token, including a partner with the narrowest scopes.
+  #
+  # The end-to-end contract test enables it explicitly, which is the only place
+  # it is needed.
+  api-docs:
+    enabled: false
   swagger-ui:
     enabled: false

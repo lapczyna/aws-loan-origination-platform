@@ -223,6 +223,12 @@ final class PlatformUnderTest {
         arguments.add("--los.security.accepted-audiences=" + AUDIENCE);
         // Health details are needed to see WHY a service is not ready. The
         // endpoint is on a throwaway process reachable only from this machine.
+        // Asked for explicitly. The aws profile turns the API-docs endpoint OFF,
+        // because an endpoint that enumerates every route and schema has no
+        // business being reachable in production. OpenApiContractIT needs it, so
+        // it is enabled here rather than left to a default that would silently
+        // diverge from what is deployed.
+        arguments.add("--springdoc.api-docs.enabled=true");
         arguments.add("--management.endpoint.health.show-details=always");
         arguments.add("--management.endpoint.health.show-components=always");
         arguments.addAll(Arrays.asList(extraArguments));

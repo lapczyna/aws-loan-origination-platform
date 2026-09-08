@@ -1,31 +1,436 @@
-openapi: 3.1.0
+components:
+  schemas:
+    ApplicantRequest:
+      description: |
+        **Restricted personal data.** Supplied on creation and never returned by any endpoint. It is stored encrypted, is not written to any log, and only the derived pseudonym crosses a service boundary.
+      properties:
+        dateOfBirth:
+          format: date
+          type: string
+        emailAddress:
+          format: email
+          maxLength: 320
+          minLength: 0
+          type: string
+        familyName:
+          maxLength: 200
+          minLength: 0
+          type: string
+        givenName:
+          maxLength: 200
+          minLength: 0
+          type: string
+        residenceCountry:
+          minLength: 1
+          pattern: "^[A-Za-z]{2}$"
+          type: string
+      required:
+      - dateOfBirth
+      - emailAddress
+      - familyName
+      - givenName
+      - residenceCountry
+      type: object
+    ApplicationResponse:
+      properties:
+        amountMinorUnits:
+          description: "The requested principal in the currency's MINOR units - cents, not euros. Money is never a floating-point number here."
+          example: 1500000
+          format: int64
+          type: integer
+        applicantInitials:
+          description: "Initials only. The API never returns an applicant's name, not even to the client that supplied it."
+          example: T.A.
+          type: string
+        applicantReference:
+          description: |
+            An irreversible HMAC pseudonym, stable for the same applicant across applications.
 
+            **Pseudonymised, not anonymised**: the same applicant always produces the same value, so it is linkable and remains personal data under GDPR.
+          example: APR-fa05675c49b42435
+          pattern: "^APR-[0-9a-f]{16}$"
+          type: string
+        applicationId:
+          description: "Opaque, server-generated."
+          format: uuid
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        currency:
+          type: string
+        decision:
+          $ref: "#/components/schemas/Decision"
+          description: Null until a decision has been recorded.
+        productCode:
+          type: string
+        purpose:
+          type: string
+        residenceCountry:
+          type: string
+        status:
+          description: The application's position in its lifecycle.
+          enum:
+          - DRAFT
+          - SUBMITTED
+          - VALIDATING
+          - CHECKS_IN_PROGRESS
+          - MANUAL_REVIEW
+          - APPROVED
+          - REJECTED
+          - FAILED
+          - CANCELLED
+          type: string
+        submittedAt:
+          format: date-time
+          type: string
+        termMonths:
+          format: int32
+          type: integer
+        updatedAt:
+          format: date-time
+          type: string
+        version:
+          description: Optimistic-locking version.
+          format: int64
+          type: integer
+      type: object
+    ApplicationStatusResponse:
+      properties:
+        applicationId:
+          format: uuid
+          type: string
+        decisionType:
+          type: string
+        reasonCode:
+          type: string
+        status:
+          enum:
+          - DRAFT
+          - SUBMITTED
+          - VALIDATING
+          - CHECKS_IN_PROGRESS
+          - MANUAL_REVIEW
+          - APPROVED
+          - REJECTED
+          - FAILED
+          - CANCELLED
+          type: string
+        terminal:
+          description: Whether the status can still change. **Stop polling when this is true.**
+          type: boolean
+        updatedAt:
+          format: date-time
+          type: string
+        version:
+          format: int64
+          type: integer
+      type: object
+    CompleteUploadRequest:
+      properties:
+        checksumSha256:
+          description: Optional. When supplied it is verified against what object storage actually holds.
+          pattern: "^[A-Fa-f0-9]{64}$"
+          type: string
+      type: object
+    CreateApplicationRequest:
+      properties:
+        applicant:
+          $ref: "#/components/schemas/ApplicantRequest"
+        loan:
+          $ref: "#/components/schemas/LoanRequestPayload"
+      required:
+      - applicant
+      - loan
+      type: object
+    Decision:
+      description: "The recorded outcome, once there is one."
+      properties:
+        decidedBy:
+          description: "The deciding reviewer's pseudonymous token subject, or null when the decision was automatic. Never a name."
+          type: string
+        reasonCode:
+          description: "A stable code, never prose. Free text about why a named individual was refused credit is exactly what must not travel through events into the audit store."
+          example: CREDIT_SCORE_BELOW_THRESHOLD
+          type: string
+        type:
+          description: |
+            `MANUAL_REVIEW` means the platform declined to decide. That is not the same as deciding against the applicant, and the record has to be able to tell the two apart later.
+          enum:
+          - APPROVED
+          - REJECTED
+          - MANUAL_REVIEW
+          type: string
+      type: object
+    DocumentResponse:
+      properties:
+        applicationId:
+          format: uuid
+          type: string
+        createdAt:
+          format: date-time
+          type: string
+        documentId:
+          format: uuid
+          type: string
+        documentType:
+          description: "PROOF_OF_IDENTITY and PROOF_OF_INCOME are mandatory: an application cannot be submitted until both have reached CLEAN."
+          enum:
+          - PROOF_OF_IDENTITY
+          - PROOF_OF_INCOME
+          - PROOF_OF_ADDRESS
+          - BANK_STATEMENT
+          type: string
+        reasonCode:
+          type: string
+        sizeBytes:
+          format: int64
+          type: integer
+        status:
+          description: Only CLEAN satisfies a mandatory requirement. Until then the object sits in a quarantine prefix and is never served.
+          enum:
+          - PENDING_UPLOAD
+          - UPLOADED
+          - SCANNING
+          - CLEAN
+          - REJECTED
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      type: object
+    LoanRequestPayload:
+      properties:
+        amountMinorUnits:
+          description: "The requested principal in the currency's MINOR units - cents, not euros. Money is never a floating-point number here."
+          example: 1500000
+          format: int64
+          minimum: 0
+          type: integer
+        currency:
+          minLength: 1
+          pattern: "^[A-Z]{3}$"
+          type: string
+        declaredAnnualIncomeMinorUnits:
+          description: "Declared gross annual income, in minor units."
+          example: 6000000
+          format: int64
+          minimum: 0
+          type: integer
+        productCode:
+          description: Internal product identifier.
+          example: PERSONAL-LOAN-STANDARD
+          minLength: 1
+          type: string
+        purpose:
+          enum:
+          - HOME_IMPROVEMENT
+          - DEBT_CONSOLIDATION
+          - VEHICLE
+          - EDUCATION
+          - MEDICAL
+          - BUSINESS
+          - OTHER
+          minLength: 1
+          type: string
+        termMonths:
+          format: int32
+          minimum: 1
+          type: integer
+      required:
+      - amountMinorUnits
+      - currency
+      - declaredAnnualIncomeMinorUnits
+      - productCode
+      - purpose
+      - termMonths
+      type: object
+    MissingDocumentsProblem:
+      description: Returned when an application cannot be submitted because a mandatory document has not been uploaded and accepted.
+      properties:
+        errorCode:
+          example: MANDATORY_DOCUMENTS_MISSING
+          type: string
+        missingDocumentTypes:
+          description: "The document CATEGORIES that are missing. Never a document's contents, and never a filename."
+          enum:
+          - PROOF_OF_IDENTITY
+          - PROOF_OF_INCOME
+          items:
+            type: string
+          type: array
+      type: object
+    PageResponseApplicationResponse:
+      properties:
+        hasNext:
+          type: boolean
+        items:
+          items:
+            $ref: "#/components/schemas/ApplicationResponse"
+          type: array
+        page:
+          format: int32
+          type: integer
+        size:
+          format: int32
+          type: integer
+        totalItems:
+          format: int64
+          type: integer
+        totalPages:
+          format: int32
+          type: integer
+      type: object
+    Problem:
+      description: |
+        An RFC 9457 Problem Detail.
+
+        It never contains a stack trace, a SQL fragment, a table name, an internal identifier, or an exception message. Validation errors name the **field** and never echo its value, because the value is frequently the personal data the platform exists to protect.
+
+        Branch on `errorCode`, never on `detail`.
+      properties:
+        correlationId:
+          description: "Ties this response to the platform's logs. Quote it when reporting a problem: it is deliberately the only link, because the body carries nothing else."
+          type: string
+        detail:
+          description: Prose for a human. May be reworded between releases.
+          type: string
+        errorCode:
+          description: Stable and machine-readable. This is what a client branches on.
+          enum:
+          - REQUEST_VALIDATION_FAILED
+          - MALFORMED_REQUEST_BODY
+          - INVALID_REQUEST_VALUE
+          - INVALID_PATH_PARAMETER
+          - ACCESS_DENIED
+          - APPLICATION_NOT_FOUND
+          - APPLICATION_NOT_EDITABLE
+          - DOCUMENT_NOT_FOUND
+          - ILLEGAL_STATE_TRANSITION
+          - ILLEGAL_DOCUMENT_STATE
+          - MANDATORY_DOCUMENTS_MISSING
+          - IDEMPOTENCY_KEY_REUSED
+          - IDEMPOTENCY_KEY_IN_USE
+          - CONCURRENT_MODIFICATION
+          - CONCURRENT_DOCUMENT_UPDATE
+          - OBJECT_STORAGE_UNAVAILABLE
+          - SCANNER_UNAVAILABLE
+          - INTERNAL_ERROR
+          type: string
+        instance:
+          example: /v1/applications/018f3a9c-6b21-7c4e-9d55-2a1b8e7f0c33/submit
+          type: string
+        status:
+          example: 409
+          format: int32
+          type: integer
+        timestamp:
+          format: date-time
+          type: string
+        title:
+          example: Conflict
+          type: string
+        type:
+          example: about:blank
+          type: string
+      type: object
+    ReviewDecisionRequest:
+      properties:
+        decision:
+          minLength: 1
+          pattern: ^(APPROVED|REJECTED)$
+          type: string
+      required:
+      - decision
+      type: object
+    StateTransitionProblem:
+      description: Returned when the requested operation is not valid for the application's current state.
+      properties:
+        attemptedStatus:
+          description: The state the request would have moved it to.
+          type: string
+        currentStatus:
+          description: The state the application is actually in.
+          type: string
+        errorCode:
+          example: ILLEGAL_STATE_TRANSITION
+          type: string
+      type: object
+    UploadRequest:
+      properties:
+        contentType:
+          description: The presigned URL is BOUND to this value. An upload whose Content-Type differs is refused by object storage.
+          example: application/pdf
+          minLength: 1
+          type: string
+        documentType:
+          minLength: 1
+          pattern: ^(PROOF_OF_IDENTITY|PROOF_OF_INCOME|PROOF_OF_ADDRESS|BANK_STATEMENT)$
+          type: string
+        sizeBytes:
+          description: Declared size. Verified against what object storage actually holds.
+          format: int64
+          minimum: 0
+          type: integer
+      required:
+      - contentType
+      - documentType
+      type: object
+    UploadTicketResponse:
+      properties:
+        documentId:
+          format: uuid
+          type: string
+        expiresAt:
+          description: Deliberately short-lived.
+          format: date-time
+          type: string
+        requiredHeaders:
+          additionalProperties:
+            type: string
+          description: "Headers that must be sent verbatim on the PUT. The signature covers them, so the upload is refused if any differs."
+          type: object
+        uploadUrl:
+          description: |
+            **A bearer credential.** Anyone holding this URL can write the object until it expires.
+
+            Never log it, never cache it, never put it in a URL shortener or an analytics payload. The response is returned with `Cache-Control: no-store` for the same reason.
+          format: uri
+          type: string
+      type: object
+  securitySchemes:
+    oauth2:
+      description: |
+        An OAuth2 bearer token, validated at API Gateway **and again by each service**. The second validation is what protects the services if anything is ever deployed with a route that bypasses the gateway.
+
+        Partners additionally present an API key. The key is what a usage plan throttles on — a capacity identity, never an authentication one — so a key alone grants nothing.
+      flows:
+        clientCredentials:
+          scopes:
+            applications:read: Read applications and their status
+            applications:write: "Create, update and submit applications"
+            documents:read: List documents on an application
+            documents:write: Request upload slots and confirm uploads
+            manual-review:decide: Record a reviewer's decision
+            manual-review:read: Read the manual review queue
+          tokenUrl: https://auth.example.com/oauth2/token
+      type: oauth2
 info:
-  title: Loan Origination Platform API
-  version: 1.0.0
-  summary: Create, document, submit and track loan applications.
+  contact:
+    name: Repository
+    url: https://example.com/aws-loan-origination-platform
   description: |
     ## What this is
 
-    A **reference implementation**. It has never been deployed, it has never
-    processed real data, and every external check behind it — KYC, AML, fraud,
-    credit scoring, malware scanning — is a **simulation** that contacts no real
-    provider.
+    A **reference implementation**. It has never been deployed, it has never processed real data, and every external check behind it — KYC, AML, fraud, credit scoring, malware scanning — is a **simulation** that contacts no real provider.
 
     ## Two services, one API surface
 
-    The paths below are served by two independently deployed services behind a
-    single API Gateway. `/v1/applications/{applicationId}/documents/**` belongs
-    to the document service; everything else belongs to the application service.
-    Callers should not depend on that split — it is recorded here because it
-    explains why a document can be accepted a moment before submission will
-    accept it.
+    These paths are served by two independently deployed services behind a single API Gateway. `/v1/applications/{applicationId}/documents/**` belongs to the document service; everything else belongs to the application service. Callers should not depend on that split — it is recorded because it explains why a document can be accepted a moment before submission will accept it.
 
     ## Idempotency
 
-    `POST /v1/applications` and `POST .../submit` accept an `Idempotency-Key`
-    header, and submission is the one that most needs it: a client that times
-    out and retries must not submit twice.
+    `POST /v1/applications` and `POST .../submit` accept an `Idempotency-Key` header, and submission is the one that most needs it: a client that times out and retries must not submit twice.
 
     | Situation | Result |
     |---|---|
@@ -33,994 +438,401 @@ info:
     | Same key, different request | `409` with `IDEMPOTENCY_KEY_REUSED` |
     | Same key, original still in flight | `409` with `IDEMPOTENCY_KEY_IN_USE` |
 
-    Requests are compared by a SHA-256 fingerprint of the **canonicalised** body,
-    so a client retrying through a different HTTP library — different whitespace,
-    different key order — is not treated as a different request.
+    Requests are compared by a SHA-256 fingerprint of the **canonicalised** body, so a client retrying through a different HTTP library — different whitespace, different key order — is not treated as a different request.
 
     ## Errors
 
-    Every error is an RFC 9457 Problem Detail carrying a stable, machine-readable
-    `errorCode`. Error responses never contain a stack trace, a SQL fragment, a
-    table name, an internal identifier, or an exception message. Validation
-    errors name the **field** and never echo its value, because the value is
-    frequently the personal data the platform exists to protect.
+    Every error is an RFC 9457 Problem Detail carrying a stable, machine-readable `errorCode`. Error responses never contain a stack trace, a SQL fragment, a table name, an internal identifier, or an exception message. Validation errors name the **field** and never echo its value, because the value is frequently the personal data the platform exists to protect.
+
+    Branch on `errorCode`, never on `detail`, which is prose and may be reworded.
 
     ## Personal data
 
-    The API never returns an applicant's name, email address or date of birth —
-    not even to the client that supplied them. An applicant is identified by
-    `applicantReference`, an irreversible HMAC pseudonym, plus initials.
+    The API never returns an applicant's name, email address or date of birth — not even to the client that supplied them. An applicant is identified by `applicantReference`, an irreversible HMAC pseudonym, plus initials.
 
-    A `applicantReference` is pseudonymised data, **not** anonymised data: the
-    same applicant always produces the same reference, so it remains personal
-    data under GDPR.
-
-  contact:
-    name: Repository
-    url: https://example.com/aws-loan-origination-platform
+    That reference is **pseudonymised, not anonymised**: the same applicant always produces the same value, so it remains personal data under GDPR.
   license:
-    name: Apache-2.0
     identifier: Apache-2.0
-
-servers:
-  - url: https://api.example.com
-    description: |
-      PLACEHOLDER. No deployment exists. A real deployment sits behind API
-      Gateway, which is regional, WAF-protected, and reachable only over TLS.
-
-tags:
-  - name: Applications
-    description: Creating, submitting and tracking a loan application.
-  - name: Documents
-    description: Uploading supporting documents through short-lived presigned URLs.
-  - name: Manual review
-    description: The queue a human works, and the decisions they record.
-
-security:
-  - oauth2: []
-
+    name: Apache-2.0
+  summary: "Create, document, submit and track loan applications."
+  title: Loan Origination Platform API
+  version: 1.0.0
+openapi: 3.1.0
 paths:
   /v1/applications:
     post:
-      tags: [Applications]
-      operationId: createApplication
-      summary: Create a draft application
       description: |
-        Creates the application in `DRAFT`. Nothing is assessed until it is
-        submitted, and it cannot be submitted until every mandatory document has
-        been uploaded and accepted.
+        Creates the application in `DRAFT`. Nothing is assessed until it is submitted, and it cannot be submitted until every mandatory document has been uploaded and accepted.
+      operationId: createDraft
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/CorrelationId'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateApplicationRequest'
-      responses:
-        '201':
-          description: |
-            Created, or replayed. A replay carries `Idempotent-Replay: true` and
-            is the original response, not a new application.
-          headers:
-            Idempotent-Replay:
-              $ref: '#/components/headers/IdempotentReplay'
-            X-Correlation-Id:
-              $ref: '#/components/headers/CorrelationId'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Application'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
-  /v1/applications/{applicationId}:
-    parameters:
-      - $ref: '#/components/parameters/ApplicationId'
-    get:
-      tags: [Applications]
-      operationId: getApplication
-      summary: Retrieve an application
-      description: |
-        The full representation. It identifies the applicant by pseudonym and
-        initials, never by the values that were supplied.
-      responses:
-        '200':
-          description: The application.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Application'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /v1/applications/{applicationId}/draft:
-    parameters:
-      - $ref: '#/components/parameters/ApplicationId'
-    put:
-      tags: [Applications]
-      operationId: updateDraft
-      summary: Replace the contents of a draft
-      description: |
-        Refused once the application has been submitted. Changing the amount
-        after submission would mean the assessment ran against figures nobody
-        submitted.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateApplicationRequest'
-      responses:
-        '200':
-          description: The updated draft.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Application'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: |
-            The application is no longer a draft. The body names the current and
-            attempted states.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/StateTransitionProblem'
-
-  /v1/applications/{applicationId}/submit:
-    parameters:
-      - $ref: '#/components/parameters/ApplicationId'
-    post:
-      tags: [Applications]
-      operationId: submitApplication
-      summary: Submit an application for assessment
-      description: |
-        Starts the assessment. Returns **202 Accepted**, not 200: the response
-        says the request was accepted, not that a decision was reached. Poll
-        `/status` for the outcome.
-
-        There is no request body. The path identifier is what the idempotency
-        fingerprint is taken over, so reusing a key against a different
-        application is a conflict rather than a silent replay of the first
-        application's result.
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/CorrelationId'
-      responses:
-        '202':
-          description: Accepted for assessment, or replayed.
-          headers:
-            Idempotent-Replay:
-              $ref: '#/components/headers/IdempotentReplay'
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Application'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/IdempotencyConflict'
-        '422':
-          description: |
-            A mandatory document has not been uploaded and accepted. The body
-            names the missing **categories** — never a document's contents.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/MissingDocumentsProblem'
-
-  /v1/applications/{applicationId}/status:
-    parameters:
-      - $ref: '#/components/parameters/ApplicationId'
-    get:
-      tags: [Applications]
-      operationId: getApplicationStatus
-      summary: The current status
-      description: |
-        Deliberately small and separate from the full representation. Status
-        polling is the highest-volume read on the platform, and a client waiting
-        for a decision should not transfer the whole application on every poll.
-      responses:
-        '200':
-          description: The current status.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApplicationStatus'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /v1/applications/{applicationId}/documents/upload-requests:
-    parameters:
-      - $ref: '#/components/parameters/ApplicationId'
-    post:
-      tags: [Documents]
-      operationId: requestDocumentUpload
-      summary: Request an upload slot
-      description: |
-        Returns a short-lived presigned `PUT` URL. The client uploads **directly
-        to object storage** — the bytes never pass through this API.
-
-        There is deliberately no filename field. A client-supplied filename is
-        user-controlled text that has to go somewhere, and every destination is
-        wrong: in the object key it leaks through access logs and inventory
-        reports, in the database it is personal data with no purpose, and in a
-        response header it is a content-disposition injection.
-
-        **The response carries a bearer credential.** It is returned with
-        `Cache-Control: no-store` — not merely `no-cache` — because a presigned
-        URL sitting in a shared cache, a proxy, or a browser's disk cache is a
-        write credential handed to whoever reads that cache next. Do not log it.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UploadRequest'
-      responses:
-        '201':
-          description: An upload slot.
-          headers:
-            Cache-Control:
-              description: Always `no-store`.
-              schema:
-                type: string
-                examples: ['no-store']
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UploadTicket'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
-  /v1/applications/{applicationId}/documents/{documentId}/complete:
-    parameters:
-      - $ref: '#/components/parameters/ApplicationId'
-      - $ref: '#/components/parameters/DocumentId'
-    post:
-      tags: [Documents]
-      operationId: completeDocumentUpload
-      summary: Confirm that an upload finished
-      description: |
-        The service does not take the client's word for it. It asks object
-        storage what is actually at the key and verifies size and content type
-        against what was declared, then queues the object for scanning.
-
-        The document becomes usable only once it reaches `CLEAN`. Until then it
-        sits in a quarantine prefix and cannot satisfy a mandatory requirement.
-      requestBody:
+      - description: "A client-generated key, unique per logical operation. Reuse it when retrying the SAME request; never reuse it for a different one."
+        example: 3f8c1b6e-9a2d-4c7f-8f10-2b5d9a1c4e77
+        in: header
+        name: Idempotency-Key
         required: false
+        schema:
+          type: string
+      requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CompleteUploadRequest'
+              $ref: "#/components/schemas/CreateApplicationRequest"
+        required: true
       responses:
-        '200':
-          description: The document's state after verification.
+        "201":
           content:
-            application/json:
+            '*/*':
               schema:
-                $ref: '#/components/schemas/Document'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '422':
-          description: |
-            What is at the key does not match what was declared, or the document
-            is not awaiting an upload.
+                $ref: "#/components/schemas/ApplicationResponse"
+          description: "Created, or replayed. A replay carries `Idempotent-Replay: true` and is the original response, not a new application."
+        "400":
           content:
-            application/problem+json:
+            '*/*':
               schema:
-                $ref: '#/components/schemas/Problem'
-
-  /v1/applications/{applicationId}/documents:
-    parameters:
-      - $ref: '#/components/parameters/ApplicationId'
+                $ref: "#/components/schemas/Problem"
+          description: The request failed validation.
+        "401":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "No token, or a token that is expired or minted for another audience."
+        "403":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: The token lacks `applications:write`.
+        "409":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "The `Idempotency-Key` was already used for a different request, or the original is still in flight."
+      summary: Create a draft application
+      tags:
+      - Applications
+  /v1/applications/{applicationId}:
     get:
-      tags: [Documents]
-      operationId: listDocuments
-      summary: The documents attached to an application
+      description: |
+        The full representation. It identifies the applicant by pseudonym and initials, never by the values that were supplied.
+      operationId: getApplication
+      parameters:
+      - in: path
+        name: applicationId
+        required: true
+        schema:
+          type: string
       responses:
-        '200':
-          description: The documents, with their scan status.
+        "200":
           content:
-            application/json:
+            '*/*':
               schema:
-                type: array
+                $ref: "#/components/schemas/ApplicationResponse"
+          description: The application.
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "No such application. Deliberately indistinguishable from \"exists but is not yours\": telling the two apart lets a caller enumerate which identifiers exist."
+      summary: Retrieve an application
+      tags:
+      - Applications
+  /v1/applications/{applicationId}/documents:
+    get:
+      description: Each carries its scan status. Only `CLEAN` satisfies a mandatory requirement.
+      operationId: listDocuments
+      parameters:
+      - in: path
+        name: applicationId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
                 items:
-                  $ref: '#/components/schemas/Document'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+                  $ref: "#/components/schemas/DocumentResponse"
+                type: array
+          description: "The documents, with their scan status."
+        "401":
+          description: "No token, or a token that is not valid here."
+        "403":
+          description: The token lacks `documents:read`.
+      summary: The documents attached to an application
+      tags:
+      - Documents
+  /v1/applications/{applicationId}/documents/upload-requests:
+    post:
+      description: |
+        Returns a short-lived presigned `PUT` URL. The client uploads **directly to object storage** — the bytes never pass through this API.
 
+        There is deliberately no filename field. A client-supplied filename is user-controlled text that has to go somewhere, and every destination is wrong: in the object key it leaks through access logs and inventory reports, in the database it is personal data with no purpose, and in a response header it is a content-disposition injection.
+
+        **The response carries a bearer credential.** It is returned with `Cache-Control: no-store` — not merely `no-cache` — because a presigned URL sitting in a shared cache, a proxy, or a browser's disk cache is a write credential handed to whoever reads that cache next. Do not log it.
+      operationId: requestUpload
+      parameters:
+      - in: path
+        name: applicationId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadRequest"
+        required: true
+      responses:
+        "201":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/UploadTicketResponse"
+          description: "An upload slot. Always `Cache-Control: no-store`."
+        "400":
+          description: The request failed validation.
+        "403":
+          description: The token lacks `documents:write`.
+      summary: Request an upload slot
+      tags:
+      - Documents
+  /v1/applications/{applicationId}/documents/{documentId}/complete:
+    post:
+      description: |
+        The service does not take the client's word for it. It asks object storage what is actually at the key and verifies size and content type against what was declared, then queues the object for scanning.
+
+        The document becomes usable only once it reaches `CLEAN`. Until then it sits in a quarantine prefix and cannot satisfy a mandatory requirement.
+      operationId: completeUpload
+      parameters:
+      - in: path
+        name: applicationId
+        required: true
+        schema:
+          type: string
+      - in: path
+        name: documentId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteUploadRequest"
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/DocumentResponse"
+          description: The document's state after verification.
+        "404":
+          description: No such document.
+        "422":
+          description: "What is at the key does not match what was declared, or the document is not awaiting an upload."
+      summary: Confirm that an upload finished
+      tags:
+      - Documents
+  /v1/applications/{applicationId}/draft:
+    put:
+      description: |
+        Refused once the application has been submitted. Changing the amount after submission would mean the assessment ran against figures nobody submitted.
+      operationId: updateDraft
+      parameters:
+      - in: path
+        name: applicationId
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApplicationRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApplicationResponse"
+          description: The updated draft.
+        "409":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/StateTransitionProblem"
+          description: The application is no longer a draft. The body names the current and attempted states.
+      summary: Replace the contents of a draft
+      tags:
+      - Applications
+  /v1/applications/{applicationId}/status:
+    get:
+      description: |
+        Deliberately small and separate from the full representation. Status polling is the highest-volume read on the platform, and a client waiting for a decision should not transfer the whole application on every poll.
+
+        Stop polling when `terminal` is true.
+      operationId: getStatus
+      parameters:
+      - in: path
+        name: applicationId
+        required: true
+        schema:
+          type: string
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApplicationStatusResponse"
+          description: The current status.
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: No such application.
+      summary: The current status
+      tags:
+      - Applications
+  /v1/applications/{applicationId}/submit:
+    post:
+      description: |
+        Starts the assessment. Returns **202 Accepted**, not 200: the response says the request was accepted, not that a decision was reached. Poll `/status` for the outcome.
+
+        There is no request body. The path identifier is what the idempotency fingerprint is taken over, so reusing a key against a different application is a conflict rather than a silent replay of the first application's result — which would tell a client its second application had been submitted when it had not.
+      operationId: submit
+      parameters:
+      - in: path
+        name: applicationId
+        required: true
+        schema:
+          type: string
+      - description: See the create operation.
+        in: header
+        name: Idempotency-Key
+        required: false
+        schema:
+          type: string
+      responses:
+        "202":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApplicationResponse"
+          description: "Accepted for assessment, or replayed."
+        "404":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: No such application.
+        "409":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: Idempotency key conflict.
+        "422":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/MissingDocumentsProblem"
+          description: "A mandatory document has not been uploaded and accepted. The body names the missing CATEGORIES, never a document's contents."
+      summary: Submit an application for assessment
+      tags:
+      - Applications
   /v1/manual-review/tasks:
     get:
-      tags: [Manual review]
-      operationId: listManualReviewTasks
-      summary: Applications awaiting a human decision
       description: |
-        Oldest first, paginated and bounded. An unbounded queue endpoint is a
-        denial-of-service vector against the platform's own database as much as
-        against the caller.
+        Oldest first, paginated and bounded. An unbounded queue endpoint is a denial-of-service vector against the platform's own database as much as against the caller.
+      operationId: listTasks
       parameters:
-        - name: page
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-        - name: size
-          in: query
-          required: false
-          schema:
-            type: integer
-            minimum: 1
-            maximum: 100
-            default: 20
-      responses:
-        '200':
-          description: A page of applications awaiting review.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApplicationPage'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-
-  /v1/manual-review/tasks/{taskId}/decisions:
-    parameters:
-      - name: taskId
-        in: path
-        required: true
-        description: |
-          The application under review. The queue is a projection of
-          applications, so a task identifier **is** an application identifier.
+      - in: query
+        name: page
+        required: false
         schema:
-          $ref: '#/components/schemas/Uuid'
+          default: 0
+          format: int32
+          type: integer
+      - in: query
+        name: size
+        required: false
+        schema:
+          default: 20
+          format: int32
+          type: integer
+      responses:
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/PageResponseApplicationResponse"
+          description: A page of applications awaiting review.
+        "403":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: The token lacks `manual-review:read`.
+      summary: Applications awaiting a human decision
+      tags:
+      - Manual review
+  /v1/manual-review/tasks/{taskId}/decisions:
     post:
-      tags: [Manual review]
-      operationId: recordManualReviewDecision
-      summary: Record a reviewer's decision
       description: |
-        The decision is attributed to the **token's subject**, never to a value
-        the client sends in the body: a caller must not be able to attribute a
-        decision to someone else.
+        The decision is attributed to the **token's subject**, never to a value the client sends in the body: a caller must not be able to attribute a decision to someone else.
 
-        There is deliberately no free-text notes field. Reviewer notes would flow
-        into the decision record and from there into events and the audit store,
-        where free text about a named individual is precisely what the platform's
-        privacy rules exclude. Capturing reviewer rationale properly needs a
-        separate, access-controlled store with its own retention rules; bolting a
-        text column onto this endpoint would look like the feature while quietly
-        breaking the guarantee.
-      requestBody:
+        There is deliberately no free-text notes field. Reviewer notes would flow into the decision record and from there into events and the audit store, where free text about a named individual is precisely what the platform's privacy rules exclude.
+      operationId: decide
+      parameters:
+      - description: "The application under review. The queue is a projection of applications, so a task identifier IS an application identifier."
+        in: path
+        name: taskId
         required: true
+        schema:
+          type: string
+      requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReviewDecisionRequest'
+              $ref: "#/components/schemas/ReviewDecisionRequest"
+        required: true
       responses:
-        '200':
+        "200":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/ApplicationResponse"
           description: The application after the decision.
+        "403":
           content:
-            application/json:
+            '*/*':
               schema:
-                $ref: '#/components/schemas/Application'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
+                $ref: "#/components/schemas/Problem"
+          description: The token lacks `manual-review:decide`.
+        "409":
+          content:
+            '*/*':
+              schema:
+                $ref: "#/components/schemas/Problem"
           description: The application is no longer awaiting review.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/StateTransitionProblem'
-
-components:
-
-  securitySchemes:
-    oauth2:
-      type: oauth2
-      description: |
-        An OAuth2 bearer token, validated at API Gateway **and again by each
-        service**. The second validation is what protects the services if
-        anything is ever deployed with a route that bypasses the gateway.
-
-        Partners additionally present an API key. The key is what a usage plan
-        throttles on — it is a capacity identity, never an authentication one, so
-        a key alone grants nothing.
-      flows:
-        clientCredentials:
-          tokenUrl: https://auth.example.com/oauth2/token
-          scopes:
-            applications:read: Read applications and their status
-            applications:write: Create, update and submit applications
-            documents:read: List documents on an application
-            documents:write: Request upload slots and confirm uploads
-            manual-review:read: Read the manual review queue
-            manual-review:decide: Record a reviewer's decision
-
-  parameters:
-    ApplicationId:
-      name: applicationId
-      in: path
-      required: true
-      schema:
-        $ref: '#/components/schemas/Uuid'
-
-    DocumentId:
-      name: documentId
-      in: path
-      required: true
-      schema:
-        $ref: '#/components/schemas/Uuid'
-
-    IdempotencyKey:
-      name: Idempotency-Key
-      in: header
-      required: false
-      description: |
-        A client-generated key, unique per logical operation. Reuse it when
-        retrying the *same* request; never reuse it for a different one.
-      schema:
-        type: string
-        minLength: 8
-        maxLength: 64
-        examples: ['3f8c1b6e-9a2d-4c7f-8f10-2b5d9a1c4e77']
-
-    CorrelationId:
-      name: X-Correlation-Id
-      in: header
-      required: false
-      description: |
-        Threads a request through every service, every event and every audit
-        record. Generated if absent, and returned on the response.
-      schema:
-        type: string
-        maxLength: 64
-
-  headers:
-    IdempotentReplay:
-      description: |
-        `true` when this response is a replay of an earlier identical request
-        rather than the result of new work.
-      schema:
-        type: boolean
-
-    CorrelationId:
-      description: The correlation identifier this request was traced under.
-      schema:
-        type: string
-
-  responses:
-    BadRequest:
-      description: The request was malformed or failed validation.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/ValidationProblem'
-
-    Unauthorized:
-      description: No token, or a token that is expired, malformed, or minted for another audience.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-
-    Forbidden:
-      description: The token is valid but lacks the scope this operation requires.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-
-    NotFound:
-      description: |
-        No such application or document. Deliberately indistinguishable from
-        "exists but is not yours": telling the two apart lets a caller enumerate
-        which identifiers exist.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-
-    IdempotencyConflict:
-      description: |
-        The `Idempotency-Key` has already been used for a different request
-        (`IDEMPOTENCY_KEY_REUSED`), or the original is still in flight
-        (`IDEMPOTENCY_KEY_IN_USE`).
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-
-    InternalError:
-      description: |
-        Something failed. The body carries a correlation identifier and nothing
-        else — no stack trace, no SQL, no table name, no exception message.
-      content:
-        application/problem+json:
-          schema:
-            $ref: '#/components/schemas/Problem'
-
-  schemas:
-
-    Uuid:
-      type: string
-      format: uuid
-      examples: ['018f3a9c-6b21-7c4e-9d55-2a1b8e7f0c33']
-
-    MinorUnits:
-      type: integer
-      format: int64
-      minimum: 0
-      description: |
-        An amount in the currency's minor units — cents, not euros. Money is
-        never a floating-point number here.
-
-    CreateApplicationRequest:
-      type: object
-      required: [applicant, loan]
-      additionalProperties: false
-      properties:
-        applicant:
-          $ref: '#/components/schemas/Applicant'
-        loan:
-          $ref: '#/components/schemas/LoanRequest'
-
-    Applicant:
-      type: object
-      description: |
-        **Restricted personal data.** Supplied on creation and never returned by
-        any endpoint. It is stored encrypted and is not written to any log.
-      required: [givenName, familyName, emailAddress, dateOfBirth, residenceCountry]
-      additionalProperties: false
-      properties:
-        givenName:
-          type: string
-          minLength: 1
-          maxLength: 100
-        familyName:
-          type: string
-          minLength: 1
-          maxLength: 100
-        emailAddress:
-          type: string
-          format: email
-          maxLength: 254
-        dateOfBirth:
-          type: string
-          format: date
-        residenceCountry:
-          type: string
-          pattern: '^[A-Za-z]{2}$'
-          description: ISO 3166-1 alpha-2.
-          examples: ['PL']
-
-    LoanRequest:
-      type: object
-      required:
-        - amountMinorUnits
-        - currency
-        - termMonths
-        - purpose
-        - declaredAnnualIncomeMinorUnits
-        - productCode
-      additionalProperties: false
-      properties:
-        amountMinorUnits:
-          $ref: '#/components/schemas/MinorUnits'
-        currency:
-          type: string
-          pattern: '^[A-Z]{3}$'
-          description: ISO 4217.
-          examples: ['EUR']
-        termMonths:
-          type: integer
-          minimum: 1
-          maximum: 480
-        purpose:
-          type: string
-          enum:
-            - HOME_IMPROVEMENT
-            - DEBT_CONSOLIDATION
-            - VEHICLE
-            - EDUCATION
-            - MEDICAL
-            - BUSINESS
-            - OTHER
-        declaredAnnualIncomeMinorUnits:
-          $ref: '#/components/schemas/MinorUnits'
-        productCode:
-          type: string
-          maxLength: 64
-          description: Internal product identifier.
-
-    Application:
-      type: object
-      description: |
-        Note what is absent: no name, no email address, no date of birth. The
-        applicant appears only as a pseudonym and initials.
-      required: [applicationId, applicantReference, status, version]
-      properties:
-        applicationId:
-          $ref: '#/components/schemas/Uuid'
-        applicantReference:
-          type: string
-          pattern: '^APR-[0-9a-f]{16}$'
-          description: |
-            An irreversible HMAC pseudonym, stable for the same applicant across
-            applications. **Pseudonymised, not anonymised** — it remains personal
-            data under GDPR.
-          examples: ['APR-fa05675c49b42435']
-        applicantInitials:
-          type: string
-          maxLength: 4
-          examples: ['T.A.']
-        residenceCountry:
-          type: string
-          examples: ['PL']
-        status:
-          $ref: '#/components/schemas/StatusValue'
-        amountMinorUnits:
-          $ref: '#/components/schemas/MinorUnits'
-        currency:
-          type: string
-        termMonths:
-          type: integer
-        purpose:
-          type: string
-        productCode:
-          type: string
-        decision:
-          oneOf:
-            - $ref: '#/components/schemas/Decision'
-            - type: 'null'
-        version:
-          type: integer
-          format: int64
-          description: Optimistic-locking version.
-        createdAt:
-          type: string
-          format: date-time
-        submittedAt:
-          oneOf:
-            - type: string
-              format: date-time
-            - type: 'null'
-        updatedAt:
-          type: string
-          format: date-time
-
-    StatusValue:
-      type: string
-      description: |
-        The application's position in its lifecycle. Transitions are enforced by
-        the domain: an illegal move is refused, not silently applied.
-      enum:
-        - DRAFT
-        - SUBMITTED
-        - VALIDATING
-        - CHECKS_IN_PROGRESS
-        - MANUAL_REVIEW
-        - APPROVED
-        - REJECTED
-        - FAILED
-        - CANCELLED
-
-    Decision:
-      type: object
-      properties:
-        type:
-          type: string
-          enum: [APPROVED, REJECTED, MANUAL_REVIEW]
-          description: |
-            `MANUAL_REVIEW` means the platform declined to decide. That is not
-            the same as deciding against the applicant, and the record has to be
-            able to tell the two apart later.
-        reasonCode:
-          type: string
-          description: |
-            A stable code, never prose. Free text about why a named individual
-            was refused credit is exactly what must not travel through events
-            into the audit store.
-          examples: ['CREDIT_SCORE_BELOW_THRESHOLD']
-        decidedBy:
-          oneOf:
-            - type: string
-            - type: 'null'
-          description: |
-            The deciding reviewer's pseudonymous token subject, or null when the
-            decision was automatic.
-
-    ApplicationStatus:
-      type: object
-      required: [applicationId, status, terminal, version]
-      properties:
-        applicationId:
-          $ref: '#/components/schemas/Uuid'
-        status:
-          $ref: '#/components/schemas/StatusValue'
-        terminal:
-          type: boolean
-          description: Whether the status can still change. Stop polling when true.
-        decisionType:
-          oneOf:
-            - type: string
-            - type: 'null'
-        reasonCode:
-          oneOf:
-            - type: string
-            - type: 'null'
-        version:
-          type: integer
-          format: int64
-        updatedAt:
-          type: string
-          format: date-time
-
-    ApplicationPage:
-      type: object
-      required: [items, page, size, totalItems, totalPages, hasNext]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: '#/components/schemas/Application'
-        page:
-          type: integer
-        size:
-          type: integer
-        totalItems:
-          type: integer
-          format: int64
-        totalPages:
-          type: integer
-        hasNext:
-          type: boolean
-
-    ReviewDecisionRequest:
-      type: object
-      required: [decision]
-      additionalProperties: false
-      properties:
-        decision:
-          type: string
-          enum: [APPROVED, REJECTED]
-          description: |
-            `MANUAL_REVIEW` is deliberately not accepted. A reviewer cannot send
-            an application back to the queue it came from, which would let it
-            loop indefinitely with nobody owning it.
-
-    UploadRequest:
-      type: object
-      required: [documentType, contentType, sizeBytes]
-      additionalProperties: false
-      properties:
-        documentType:
-          $ref: '#/components/schemas/DocumentType'
-        contentType:
-          type: string
-          description: |
-            The presigned URL is bound to this value. An upload whose
-            `Content-Type` differs is refused by object storage.
-          examples: ['application/pdf']
-        sizeBytes:
-          type: integer
-          format: int64
-          minimum: 1
-
-    DocumentType:
-      type: string
-      enum:
-        - PROOF_OF_IDENTITY
-        - PROOF_OF_INCOME
-        - PROOF_OF_ADDRESS
-        - BANK_STATEMENT
-      description: |
-        `PROOF_OF_IDENTITY` and `PROOF_OF_INCOME` are mandatory: an application
-        cannot be submitted until both have been uploaded and reached `CLEAN`.
-
-    UploadTicket:
-      type: object
-      required: [documentId, uploadUrl, requiredHeaders, expiresAt]
-      properties:
-        documentId:
-          $ref: '#/components/schemas/Uuid'
-        uploadUrl:
-          type: string
-          format: uri
-          description: |
-            **A bearer credential.** Anyone holding this URL can write the object
-            until it expires. Never log it, never cache it, never put it in a
-            URL-shortener or an analytics payload.
-        requiredHeaders:
-          type: object
-          additionalProperties:
-            type: string
-          description: |
-            Headers that must be sent verbatim on the `PUT`. The signature covers
-            them, so the upload is refused if any differs.
-        expiresAt:
-          type: string
-          format: date-time
-
-    CompleteUploadRequest:
-      type: object
-      additionalProperties: false
-      properties:
-        checksumSha256:
-          type: string
-          pattern: '^[A-Fa-f0-9]{64}$'
-          description: |
-            Optional. When supplied it is verified against what object storage
-            actually holds.
-
-    Document:
-      type: object
-      required: [documentId, applicationId, documentType, status]
-      properties:
-        documentId:
-          $ref: '#/components/schemas/Uuid'
-        applicationId:
-          $ref: '#/components/schemas/Uuid'
-        documentType:
-          $ref: '#/components/schemas/DocumentType'
-        status:
-          type: string
-          enum: [PENDING_UPLOAD, UPLOADED, SCANNING, CLEAN, REJECTED]
-          description: |
-            Only `CLEAN` satisfies a mandatory requirement. Until then the object
-            sits in a quarantine prefix.
-        reasonCode:
-          oneOf:
-            - type: string
-            - type: 'null'
-          description: |
-            A stable code when a document was refused — never a scanner's finding
-            text, which can quote bytes from the file it matched.
-        createdAt:
-          type: string
-          format: date-time
-        updatedAt:
-          type: string
-          format: date-time
-
-    Problem:
-      type: object
-      description: |
-        RFC 9457. Carries a stable `errorCode` for machines and a `detail` for
-        humans. Never a stack trace, a SQL fragment, a table name, or an
-        exception message.
-      required: [type, title, status, errorCode]
-      properties:
-        type:
-          type: string
-          format: uri
-          examples: ['about:blank']
-        title:
-          type: string
-        status:
-          type: integer
-        detail:
-          type: string
-        instance:
-          type: string
-        errorCode:
-          $ref: '#/components/schemas/ErrorCode'
-        correlationId:
-          type: string
-
-    ErrorCode:
-      type: string
-      description: |
-        Stable and machine-readable. Clients should branch on this, never on
-        `detail`, which is prose and may be reworded.
-      enum:
-        - REQUEST_VALIDATION_FAILED
-        - MALFORMED_REQUEST_BODY
-        - INVALID_REQUEST_VALUE
-        - INVALID_PATH_PARAMETER
-        - ACCESS_DENIED
-        - APPLICATION_NOT_FOUND
-        - APPLICATION_NOT_EDITABLE
-        - DOCUMENT_NOT_FOUND
-        - ILLEGAL_STATE_TRANSITION
-        - ILLEGAL_DOCUMENT_STATE
-        - MANDATORY_DOCUMENTS_MISSING
-        - IDEMPOTENCY_KEY_REUSED
-        - IDEMPOTENCY_KEY_IN_USE
-        - CONCURRENT_MODIFICATION
-        - CONCURRENT_DOCUMENT_UPDATE
-        - OBJECT_STORAGE_UNAVAILABLE
-        - SCANNER_UNAVAILABLE
-        - INTERNAL_ERROR
-
-    ValidationProblem:
-      allOf:
-        - $ref: '#/components/schemas/Problem'
-        - type: object
-          properties:
-            invalidFields:
-              type: array
-              description: |
-                The **fields** that failed, never their values. A validation
-                message echoing the value would put the personal data straight
-                back into an error response and, from there, into a client's log.
-              items:
-                type: object
-                properties:
-                  field:
-                    type: string
-                    examples: ['applicant.emailAddress']
-                  message:
-                    type: string
-                    examples: ['must be a well-formed email address']
-
-    StateTransitionProblem:
-      allOf:
-        - $ref: '#/components/schemas/Problem'
-        - type: object
-          properties:
-            currentStatus:
-              $ref: '#/components/schemas/StatusValue'
-            attemptedStatus:
-              $ref: '#/components/schemas/StatusValue'
-
-    MissingDocumentsProblem:
-      allOf:
-        - $ref: '#/components/schemas/Problem'
-        - type: object
-          properties:
-            missingDocumentTypes:
-              type: array
-              description: Categories, never contents.
-              items:
-                $ref: '#/components/schemas/DocumentType'
+      summary: Record a reviewer's decision
+      tags:
+      - Manual review
+security:
+- oauth2: []
+servers:
+- description: "PLACEHOLDER. No deployment exists. A real deployment sits behind API Gateway, which is regional, WAF-protected, and reachable only over TLS."
+  url: https://api.example.com
+tags:
+- description: "Creating, submitting and tracking a loan application."
+  name: Applications
+- description: Uploading supporting documents through short-lived presigned URLs.
+  name: Documents
+- description: "The queue a human works, and the decisions they record."
+  name: Manual review

@@ -5,6 +5,12 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -18,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.example.los.application.adapter.in.web.dto.ApplicationResponse;
 import com.example.los.application.adapter.in.web.dto.PageResponse;
+import com.example.los.application.adapter.in.web.dto.ProblemResponse;
 import com.example.los.application.domain.model.ApplicationId;
 import com.example.los.application.domain.model.ApplicationStatus;
 import com.example.los.application.domain.model.DecisionType;
@@ -34,6 +41,7 @@ import com.example.los.application.usecase.service.RecordAssessmentOutcomeUseCas
  */
 @RestController
 @RequestMapping("/v1/manual-review")
+@Tag(name = "Manual review")
 class ManualReviewController {
 
     private static final int DEFAULT_PAGE_SIZE = 20;
@@ -54,6 +62,15 @@ class ManualReviewController {
      */
     @GetMapping("/tasks")
     @PreAuthorize("hasAuthority('SCOPE_manual-review:read')")
+    @Operation(
+            summary = "Applications awaiting a human decision",
+            description = """
+                    Oldest first, paginated and bounded. An unbounded queue endpoint is a \
+                    denial-of-service vector against the platform's own database as much as \
+                    against the caller.
+                    """)
+    @ApiResponse(responseCode = "200", description = "A page of applications awaiting review.")
+    @ApiResponse(responseCode = "403", description = "The token lacks `manual-review:read`.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
     PageResponse<ApplicationResponse> listTasks(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) int size) {
@@ -78,8 +95,27 @@ class ManualReviewController {
      */
     @PostMapping("/tasks/{taskId}/decisions")
     @PreAuthorize("hasAuthority('SCOPE_manual-review:decide')")
+    @Operation(
+            summary = "Record a reviewer's decision",
+            description = """
+                    The decision is attributed to the **token's subject**, never to a value \
+                    the client sends in the body: a caller must not be able to attribute a \
+                    decision to someone else.
+
+                    There is deliberately no free-text notes field. Reviewer notes would flow \
+                    into the decision record and from there into events and the audit store, \
+                    where free text about a named individual is precisely what the platform's \
+                    privacy rules exclude.
+                    """)
+    @ApiResponse(responseCode = "200", description = "The application after the decision.")
+    @ApiResponse(responseCode = "403", description = "The token lacks `manual-review:decide`.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
+    @ApiResponse(responseCode = "409", description = "The application is no longer awaiting review.", content = @Content(schema = @Schema(implementation = ProblemResponse.class)))
     ApplicationResponse decide(
-            @PathVariable String taskId,
+            @Parameter(
+                            description = "The application under review. The queue is a projection of "
+                                    + "applications, so a task identifier IS an application identifier.")
+                    @PathVariable
+                    String taskId,
             @Valid @RequestBody ReviewDecisionRequest request,
             @AuthenticationPrincipal Jwt reviewer) {
 

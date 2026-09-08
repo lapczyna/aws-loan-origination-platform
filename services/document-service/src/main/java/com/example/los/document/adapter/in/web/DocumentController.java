@@ -9,6 +9,11 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -46,6 +51,7 @@ import com.example.los.events.vocabulary.DocumentType;
  */
 @RestController
 @RequestMapping("/v1/applications/{applicationId}/documents")
+@Tag(name = "Documents")
 class DocumentController {
 
     private final DocumentUploadUseCase uploads;
@@ -63,6 +69,26 @@ class DocumentController {
      */
     @PostMapping("/upload-requests")
     @PreAuthorize("hasAuthority('SCOPE_documents:write')")
+    @Operation(
+            summary = "Request an upload slot",
+            description = """
+                    Returns a short-lived presigned `PUT` URL. The client uploads **directly \
+                    to object storage** — the bytes never pass through this API.
+
+                    There is deliberately no filename field. A client-supplied filename is \
+                    user-controlled text that has to go somewhere, and every destination is \
+                    wrong: in the object key it leaks through access logs and inventory \
+                    reports, in the database it is personal data with no purpose, and in a \
+                    response header it is a content-disposition injection.
+
+                    **The response carries a bearer credential.** It is returned with \
+                    `Cache-Control: no-store` — not merely `no-cache` — because a presigned \
+                    URL sitting in a shared cache, a proxy, or a browser's disk cache is a \
+                    write credential handed to whoever reads that cache next. Do not log it.
+                    """)
+    @ApiResponse(responseCode = "201", description = "An upload slot. Always `Cache-Control: no-store`.")
+    @ApiResponse(responseCode = "400", description = "The request failed validation.", content = @Content)
+    @ApiResponse(responseCode = "403", description = "The token lacks `documents:write`.", content = @Content)
     ResponseEntity<UploadTicketResponse> requestUpload(
             @PathVariable String applicationId, @Valid @RequestBody UploadRequest request) {
 
@@ -95,6 +121,23 @@ class DocumentController {
      */
     @PostMapping("/{documentId}/complete")
     @PreAuthorize("hasAuthority('SCOPE_documents:write')")
+    @Operation(
+            summary = "Confirm that an upload finished",
+            description = """
+                    The service does not take the client's word for it. It asks object \
+                    storage what is actually at the key and verifies size and content type \
+                    against what was declared, then queues the object for scanning.
+
+                    The document becomes usable only once it reaches `CLEAN`. Until then it \
+                    sits in a quarantine prefix and cannot satisfy a mandatory requirement.
+                    """)
+    @ApiResponse(responseCode = "200", description = "The document's state after verification.")
+    @ApiResponse(responseCode = "404", description = "No such document.", content = @Content)
+    @ApiResponse(
+            responseCode = "422",
+            description = "What is at the key does not match what was declared, or the "
+                    + "document is not awaiting an upload.",
+            content = @Content)
     DocumentResponse completeUpload(
             @PathVariable String applicationId,
             @PathVariable String documentId,
@@ -110,6 +153,12 @@ class DocumentController {
 
     @GetMapping
     @PreAuthorize("hasAuthority('SCOPE_documents:read')")
+    @Operation(
+            summary = "The documents attached to an application",
+            description = "Each carries its scan status. Only `CLEAN` satisfies a mandatory requirement.")
+    @ApiResponse(responseCode = "200", description = "The documents, with their scan status.")
+    @ApiResponse(responseCode = "401", description = "No token, or a token that is not valid here.", content = @Content)
+    @ApiResponse(responseCode = "403", description = "The token lacks `documents:read`.", content = @Content)
     List<DocumentResponse> listDocuments(@PathVariable String applicationId) {
         return uploads.listForApplication(applicationId).stream()
                 .map(DocumentResponse::from)
@@ -139,9 +188,15 @@ class DocumentController {
             String documentType,
 
             @NotBlank(message = "contentType is required")
+            @Schema(
+                            description = "The presigned URL is BOUND to this value. An upload whose "
+                                    + "Content-Type differs is refused by object storage.",
+                            example = "application/pdf")
             String contentType,
 
-            @Positive(message = "sizeBytes must be positive") Long sizeBytes) {}
+            @Positive(message = "sizeBytes must be positive")
+            @Schema(description = "Declared size. Verified against what object storage actually holds.")
+            Long sizeBytes) {}
 
     /**
      * Optional completion details.
@@ -150,7 +205,12 @@ class DocumentController {
      *                       is compared with the checksum S3 computed, which gives
      *                       end-to-end integrity rather than the client's word
      */
-    record CompleteUploadRequest(String checksumSha256) {}
+    record CompleteUploadRequest(
+            @Schema(
+                            description = "Optional. When supplied it is verified against what object "
+                                    + "storage actually holds.",
+                            pattern = "^[A-Fa-f0-9]{64}$")
+                    String checksumSha256) {}
 
     /**
      * The upload slot.
@@ -163,7 +223,23 @@ class DocumentController {
      * @param expiresAt       when the URL stops working
      */
     record UploadTicketResponse(
-            String documentId, String uploadUrl, Map<String, String> requiredHeaders, Instant expiresAt) {
+            @Schema(format = "uuid") String documentId,
+            @Schema(
+                            description = """
+                            **A bearer credential.** Anyone holding this URL can write the object \
+                            until it expires.
+
+                            Never log it, never cache it, never put it in a URL shortener or an \
+                            analytics payload. The response is returned with `Cache-Control: \
+                            no-store` for the same reason.
+                            """,
+                            format = "uri")
+                    String uploadUrl,
+            @Schema(
+                            description = "Headers that must be sent verbatim on the PUT. The signature "
+                                    + "covers them, so the upload is refused if any differs.")
+                    Map<String, String> requiredHeaders,
+            @Schema(description = "Deliberately short-lived.") Instant expiresAt) {
 
         public UploadTicketResponse {
             requiredHeaders = Map.copyOf(requiredHeaders);
@@ -185,10 +261,29 @@ class DocumentController {
      * the key would tell an attacker exactly what to try to reach.
      */
     record DocumentResponse(
-            String documentId,
-            String applicationId,
-            String documentType,
-            String status,
+            @Schema(format = "uuid") String documentId,
+            @Schema(format = "uuid") String applicationId,
+            @Schema(
+                            description = "PROOF_OF_IDENTITY and PROOF_OF_INCOME are mandatory: an "
+                                    + "application cannot be submitted until both have reached CLEAN.",
+                            allowableValues = {
+                                "PROOF_OF_IDENTITY",
+                                "PROOF_OF_INCOME",
+                                "PROOF_OF_ADDRESS",
+                                "BANK_STATEMENT"
+                            })
+                    String documentType,
+            @Schema(
+                            description = "Only CLEAN satisfies a mandatory requirement. Until then the "
+                                    + "object sits in a quarantine prefix and is never served.",
+                            allowableValues = {
+                                "PENDING_UPLOAD",
+                                "UPLOADED",
+                                "SCANNING",
+                                "CLEAN",
+                                "REJECTED"
+                            })
+                    String status,
             Long sizeBytes,
             String reasonCode,
             Instant createdAt,

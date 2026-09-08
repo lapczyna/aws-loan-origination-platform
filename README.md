@@ -311,8 +311,9 @@ infrastructure failure. See
 | How would tampering with a decision be detected? | [ADR-0009](docs/adr/0009-hash-chained-append-only-audit-trail.md) — hash-chained, append-only |
 | How do three services work without applicant personal data? | [ADR-0010](docs/adr/0010-pseudonymous-applicant-reference.md) — HMAC pseudonym, peppered from a file |
 | Why is a retry safe? | [ADR-0012](docs/adr/0012-idempotency-keys.md) — canonical request fingerprints |
+| How is the API contract kept honest? | [ADR-0016](docs/adr/0016-openapi-generated-from-the-code.md) — generated from the code, drift fails the build |
 
-All fifteen are indexed in [`docs/adr/`](docs/adr/README.md).
+All sixteen are indexed in [`docs/adr/`](docs/adr/README.md).
 
 ---
 
@@ -330,11 +331,11 @@ already link to them, and `scripts/check-doc-links.sh` reports exactly which.
 | [`docs/security/data-classification.md`](docs/security/data-classification.md) | What is held, how long, and the honest problem with erasure |
 | [`docs/security/incident-response.md`](docs/security/incident-response.md) | Severity, playbooks, what is available to investigate with |
 | [`docs/security/scanning.md`](docs/security/scanning.md) | Every scanner result and every suppression's justification |
+| [`docs/api/openapi.yaml`](docs/api/openapi.yaml) | The OpenAPI 3.1 contract — **generated from the code**, and a test fails the build if it drifts |
 | [`docs/operations/runbooks/secret-rotation.md`](docs/operations/runbooks/secret-rotation.md) | Rotate first, then consider history |
 | [`infrastructure/terraform/README.md`](infrastructure/terraform/README.md) | Module inventory, cost warnings, HA vs DR |
 | *`docs/adr/`* | Architecture decision records — Phase 12 |
 | *`docs/architecture/`* | Context, containers, sequences, AWS topology — Phase 12 |
-| *`docs/api/openapi.yaml`* | The OpenAPI 3.1 contract — Phase 12 |
 | *`docs/operations/cost.md`* | Cost drivers — Phase 12 |
 | *`docs/public-release-checklist.md`* | What must happen before this is made public — Phase 12 |
 

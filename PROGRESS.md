@@ -54,7 +54,7 @@ Last updated: 2026-09-08
 Every command below was executed on this machine and its output observed.
 
 ```bash
-./mvnw clean verify            # 291 tests, 0 failures, 0 errors, 0 skipped
+./mvnw clean verify            # 293 tests, 0 failures, 0 errors, 0 skipped
 scripts/validate-terraform.sh  # fmt + validate + tflint + checkov, exit 0
 scripts/validate-helm.sh       # helm lint + template + kubeconform, exit 0
 scripts/secret-scan.sh         # gitleaks, working tree and full history
@@ -85,10 +85,10 @@ Testcontainers integration test executed rather than being skipped.
 | `services/document-service` | — | 11 |
 | `services/audit-service` | 11 | 9 |
 | `tests/architecture` | 31 | — |
-| `tests/end-to-end` | — | 16 |
-| **Total** | **219** | **72** |
+| `tests/end-to-end` | — | 18 |
+| **Total** | **219** | **74** |
 
-**291 tests, 0 failures, 0 errors, 0 skipped.**
+**293 tests, 0 failures, 0 errors, 0 skipped.**
 
 ### Scanner results
 
@@ -352,6 +352,7 @@ between services as a Java object.
 | `SubmissionSemanticsIT` | Repeated idempotency key, key reused for another application, six concurrent submissions, missing mandatory document, abandoned upload, editing after submission |
 | `AssessmentOutcomesIT` | Business rejection, inconclusive to manual review and a reviewer's decision, transient failure that recovers, permanent failure, credit score below threshold, credit score in the review band |
 | `EventDeliveryIT` | Duplicate event delivery, an outcome redelivered after the decision, and a **broker outage** — the Kafka container is paused mid-submission, the event is held in the outbox, and publication resumes on recovery |
+| `OpenApiContractIT` | Generates the API contract from both running services and fails if the committed document has drifted; also asserts no personal data reached the published schemas |
 
 Four bugs in the tests themselves, found by running them rather than reading
 them, and each worth recording:
@@ -379,8 +380,11 @@ the files were scanned with gitleaks before being committed.
 
 **Documentation.** The link checker went from 16 missing documents to none:
 
-- `docs/api/openapi.yaml` — OpenAPI 3.1, valid under Redocly. One suppressed
-  rule, with a justification in `redocly.yaml`.
+- `docs/api/openapi.yaml` — OpenAPI 3.1, valid under Redocly with **zero
+  warnings**, and **generated from the running services** rather than written by
+  hand. See ADR-0016; the first generation run immediately found two
+  discrepancies the hand-written version had, which is the argument for
+  generating it.
 - 11 alarm runbooks, each written for the person the alarm woke: what it means,
   what it does **not** mean, first checks, likely causes, and what not to do.
 - `docs/operations/cost.md`, `terraform-state-bootstrap.md`,
@@ -408,11 +412,13 @@ the files were scanned with gitleaks before being committed.
   under actionlint, but the repository has no remote, so GitHub Actions has
   never run a job. "The YAML is valid and the same commands pass locally" is a
   weaker claim than "the pipeline is green", and only the weaker one is made.
-- **The OpenAPI document is hand-written, not generated from the code.** It
-  was written against the actual controllers and DTOs and is valid OpenAPI 3.1,
-  but nothing enforces that it stays in step with them. springdoc is a
-  dependency and could generate it; reconciling a generated document with the
-  hand-written commentary is unfinished work.
+- The OpenAPI document is **generated from the running services** and committed,
+  with `OpenApiContractIT` failing the build if the two drift. The remaining
+  limitation is narrower: three documentation-only types describe the error
+  responses, because Spring's `ProblemDetail` is map-backed and generates a
+  schema that says nothing about what `errorCode` can contain. They describe the
+  real wire shape and the integration tests assert those codes against real
+  responses, but nothing mechanically ties the two together.
 - **The k6 scripts have never been run against anything.** They are excluded from
   the build and from CI on purpose, and their thresholds are therefore guesses
   rather than measurements.

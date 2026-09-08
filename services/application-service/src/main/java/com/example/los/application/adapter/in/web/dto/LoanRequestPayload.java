@@ -7,6 +7,8 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * The requested loan terms.
  *
@@ -18,7 +20,11 @@ import jakarta.validation.constraints.PositiveOrZero;
 public record LoanRequestPayload(
         @NotNull(message = "amountMinorUnits is required")
         @Positive(message = "amountMinorUnits must be positive")
-        Long amountMinorUnits,
+        @Schema(
+                        description = "The requested principal in the currency's MINOR units - cents, "
+                                + "not euros. Money is never a floating-point number here.",
+                        example = "1500000")
+                Long amountMinorUnits,
 
         @NotBlank(message = "currency is required")
         @Pattern(regexp = "^[A-Z]{3}$", message = "currency must be an ISO 4217 code")
@@ -29,11 +35,23 @@ public record LoanRequestPayload(
         Integer termMonths,
 
         @NotBlank(message = "purpose is required")
-        String purpose,
+        @Schema(
+                        allowableValues = {
+                            "HOME_IMPROVEMENT",
+                            "DEBT_CONSOLIDATION",
+                            "VEHICLE",
+                            "EDUCATION",
+                            "MEDICAL",
+                            "BUSINESS",
+                            "OTHER"
+                        })
+                String purpose,
 
         @NotNull(message = "declaredAnnualIncomeMinorUnits is required")
         @PositiveOrZero(message = "declaredAnnualIncomeMinorUnits must not be negative")
-        Long declaredAnnualIncomeMinorUnits,
+        @Schema(description = "Declared gross annual income, in minor units.", example = "6000000")
+                Long declaredAnnualIncomeMinorUnits,
 
         @NotBlank(message = "productCode is required")
-        String productCode) {}
+        @Schema(description = "Internal product identifier.", example = "PERSONAL-LOAN-STANDARD")
+                String productCode) {}

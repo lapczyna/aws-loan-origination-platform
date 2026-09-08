@@ -381,11 +381,8 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Lint the OpenAPI document
-        run: |
-          set -euo pipefail
-          if [ ! -f docs/api/openapi.yaml ]; then
-            echo "docs/api/openapi.yaml does not exist yet (Phase 12)."
-            echo "Reported rather than passed silently, so the gap stays visible."
-            exit 0
-          fi
-          npx --yes @redocly/cli@1.34.3 lint docs/api/openapi.yaml
+        # The document is GENERATED from the running services and committed;
+        # OpenApiContractIT, in the build job, is what fails if the two have
+        # drifted. This job checks the committed document is valid OpenAPI,
+        # which the generator does not guarantee on its own.
+        run: npx --yes @redocly/cli@1.34.3 lint docs/api/openapi.yaml

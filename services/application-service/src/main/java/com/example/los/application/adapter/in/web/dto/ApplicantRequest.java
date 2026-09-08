@@ -9,6 +9,8 @@ import jakarta.validation.constraints.Past;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * Applicant details supplied by the client.
  *
@@ -21,6 +23,12 @@ import jakarta.validation.constraints.Size;
  * validation messages below are written so that a rejection never quotes the
  * offending value.
  */
+@Schema(
+        description = """
+        **Restricted personal data.** Supplied on creation and never returned by any \
+        endpoint. It is stored encrypted, is not written to any log, and only the \
+        derived pseudonym crosses a service boundary.
+        """)
 public record ApplicantRequest(
         @NotBlank(message = "givenName is required")
         @Size(max = 200, message = "givenName is too long")
