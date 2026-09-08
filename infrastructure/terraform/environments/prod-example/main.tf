@@ -391,6 +391,40 @@ module "eks" {
 }
 
 # -----------------------------------------------------------------------------
+# Per-service identities.
+#
+# One IAM role per service, bound to its Kubernetes ServiceAccount by an EKS Pod
+# Identity association. A shared role would give every pod the union of all four
+# services' permissions.
+# -----------------------------------------------------------------------------
+module "iam" {
+  source = "../../modules/iam"
+  count  = local.enabled
+
+  environment = var.environment
+  region      = var.region
+  account_id  = local.account_id
+
+  eks_cluster_name = module.eks[0].cluster_name
+
+  # The resource id, not the identifier: an ARN built from the name grants
+  # nothing, and the failure looks like a network problem.
+  db_resource_id  = module.database[0].resource_id
+  msk_cluster_arn = module.events[0].cluster_arn
+
+  documents_bucket_arn = module.documents_bucket[0].bucket_arn
+  audit_bucket_arn     = module.audit_bucket[0].bucket_arn
+
+  documents_kms_key_arn = module.kms_documents[0].key_arn
+  audit_kms_key_arn     = module.kms_audit[0].key_arn
+  # The Secrets Manager entries the services mount are encrypted with the
+  # database key, which is also what RDS uses for its managed master secret.
+  secrets_kms_key_arn = module.kms_database[0].key_arn
+
+  metric_namespace = "${var.environment}/LoanOrigination"
+}
+
+# -----------------------------------------------------------------------------
 # The public edge.
 #
 # Everything reaching the platform passes through here: WAF, the JWT authorizer,

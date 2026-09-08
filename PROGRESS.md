@@ -111,7 +111,7 @@ Testcontainers integration test executed rather than being skipped.
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint | clean, exit 0 |
-| checkov | 417 passed, **0 failed**, 36 skipped |
+| checkov | 446 passed, **0 failed**, 36 skipped |
 | `helm lint` / `helm template` / kubeconform | clean |
 | actionlint 1.7.7 — all four workflows | clean |
 | `scripts/check-action-pins.sh` | every action SHA-pinned |
@@ -470,11 +470,20 @@ true of an earlier tree and not of the committed one.
   Compose stack, but not as an automated suite.
 - `tests/performance` and `tests/security` do not exist. The k6 scripts are
   Phase 12 work.
-- Terraform modules named in the design but **not written**: `secrets`, `iam`,
-  `disaster-recovery`. The consequence worth stating is that the per-service
-  IRSA roles the Helm chart's ServiceAccounts annotate do not exist, so no pod
-  could reach S3, Secrets Manager or the database until they are written.
-  Every module that *does* exist now has a caller.
+- Terraform modules named in the design but **not written**: `secrets` and
+  `disaster-recovery`. Every module that *does* exist has a caller.
+- **The roles for cluster add-ons do not exist** — the AWS Load Balancer
+  Controller, the cluster autoscaler, the EBS CSI driver, the Secrets Store CSI
+  driver. They are cluster infrastructure rather than this platform's services
+  and would use IRSA against the OIDC provider the `eks` module creates. Without
+  the load balancer controller the chart's Ingress produces no ALB, so the
+  internal load balancer's target stays empty.
+- **The chart mounts a database password while the RDS module enables IAM
+  database authentication.** Both paths are real and only one should survive a
+  deployment. The `iam` module grants both — `rds-db:connect` scoped to the
+  service's own runtime user, and `secretsmanager:GetSecretValue` on that
+  service's own secret — rather than silently picking a side. Resolving it is a
+  decision, not a cleanup.
 - The internal load balancer's **target is null on a first apply**, and that is
   by design rather than an omission: the ALB is created by the AWS Load Balancer
   Controller from the chart's Ingress, which needs the cluster, which needs the

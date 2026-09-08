@@ -66,6 +66,7 @@ account, or a hard-coded name. Environments supply those.
 | `msk` | MSK with IAM authentication only, `min.insync.replicas=2`, unclean leader election off | yes |
 | `s3-documents` | Quarantine and accepted prefixes, presigned-upload CORS, lifecycle | yes |
 | `s3-audit` | Object Lock, versioning, an explicit deny on deletion, access logging | yes |
+| `iam` | One least-privilege role per service, bound to its ServiceAccount by EKS Pod Identity | yes |
 | `ecr` | Immutable tags, scan on push | yes |
 | `eks` | Private-endpoint cluster, access entries rather than aws-auth, IRSA, and nodes whose pods cannot reach instance metadata | yes |
 | `cloudwatch` | Log groups and the full alarm set, including outbox age, consumer lag and stuck applications | yes |
@@ -95,12 +96,15 @@ which trades the hop for a component to operate.
 
 ### Modules named in the design but not yet written
 
-`secrets`, `iam`, `disaster-recovery`. Listed here rather than omitted, so the
-gap is visible.
+`secrets` and `disaster-recovery`. Listed here rather than omitted, so the gap
+is visible.
 
-Their absence has a consequence worth stating: the per-service IRSA roles the
-Helm chart's ServiceAccounts annotate do not exist, so a deployment would need
-them written before any pod could reach S3, Secrets Manager or the database.
+The roles for cluster ADD-ONS are also absent — the AWS Load Balancer
+Controller, the cluster autoscaler, the EBS CSI driver, the Secrets Store CSI
+driver. Those are cluster infrastructure rather than this platform's services,
+and they use IRSA against the OIDC provider the `eks` module creates. Without
+them the chart's Ingress produces no ALB, so the load balancer's target stays
+empty.
 
 ### HA is not DR
 
@@ -128,7 +132,7 @@ Last run 2026-09-07, via `scripts/validate-terraform.sh`:
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint 0.64.0 | clean, exit 0 |
-| checkov 3.3.8 | **417 passed, 0 failed, 36 skipped** |
+| checkov 3.3.8 | **446 passed, 0 failed, 36 skipped** |
 
 Every suppression carries a written justification, and most are inline on the
 resource rather than global, so the next genuine occurrence of the same check
