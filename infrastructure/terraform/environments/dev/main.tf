@@ -301,6 +301,45 @@ module "events" {
 }
 
 # -----------------------------------------------------------------------------
+# The edge, inside the VPC.
+#
+# API Gateway -> VPC Link -> this NLB -> the ALB the Helm chart creates -> pods.
+# The NLB exists because a REST API's VPC Link accepts a network load balancer
+# and nothing else; the ALB exists because path routing is layer 7.
+# -----------------------------------------------------------------------------
+module "internal_load_balancer" {
+  # A deliberate DEVELOPMENT setting, and the suppression is scoped here rather
+  # than in the module so that production -- which leaves deletion protection on
+  # -- is still checked. If anyone turns it off in prod-example, the scan fails.
+  #
+  # checkov:skip=CKV_AWS_150:Deletion protection is off in development, where tearing the environment down and rebuilding it is routine. prod-example sets enable_deletion_protection = true.
+
+  source = "../../modules/internal-load-balancer"
+  count  = local.enabled
+
+  environment        = var.environment
+  vpc_id             = module.networking[0].vpc_id
+  vpc_cidr           = module.networking[0].vpc_cidr
+  private_subnet_ids = module.networking[0].private_subnet_ids
+
+  # The VPC Link's network interfaces live in this VPC and AWS exposes no
+  # security group for them, so this is a CIDR rule -- narrowed to the VPC and
+  # to the listener port.
+  allowed_source_cidrs = [module.networking[0].vpc_cidr]
+
+  # TLS terminates here as well as at the edge. Also the only way an NLB writes
+  # access logs at all.
+  enable_tls      = var.internal_tls_certificate_arn != null
+  certificate_arn = var.internal_tls_certificate_arn
+
+  # Null on a first apply: the ALB does not exist until the Helm chart is
+  # installed, which needs the cluster this module's outputs help create.
+  target_arn = var.internal_alb_arn
+
+  enable_deletion_protection = false
+}
+
+# -----------------------------------------------------------------------------
 # Kubernetes.
 #
 # COST: the control plane is billed hourly at a fixed rate whether or not a pod
@@ -329,6 +368,9 @@ module "eks" {
 
   cluster_admin_role_arns = var.cluster_admin_role_arns
 
+  # The nodes accept traffic from this load balancer and from nothing else.
+  load_balancer_security_group_ids = [module.internal_load_balancer[0].security_group_id]
+
   # COST: the smallest instances that will run the four services, and two
   # nodes rather than three. A zone failure in development is an
   # inconvenience.
@@ -336,6 +378,33 @@ module "eks" {
   node_desired_size   = 2
   node_min_size       = 2
   node_max_size       = 4
+}
+
+# -----------------------------------------------------------------------------
+# The public edge.
+#
+# Everything reaching the platform passes through here: WAF, the JWT authorizer,
+# throttling, usage plans and access logging. The load balancer behind it is
+# internal, so there is no route that bypasses this.
+# -----------------------------------------------------------------------------
+module "api_gateway" {
+  source = "../../modules/api-gateway"
+  count  = local.enabled
+
+  environment = var.environment
+  stage_name  = "v1"
+
+  # PLACEHOLDER. A real user-pool ARN names the account and the pool.
+  cognito_user_pool_arns = var.cognito_user_pool_arns
+
+  internal_nlb_arn = module.internal_load_balancer[0].arn
+  internal_nlb_url = module.internal_load_balancer[0].integration_url
+
+  access_log_group_arn = module.cloudwatch[0].api_gateway_access_log_group_arn
+  waf_log_group_arn    = module.cloudwatch[0].waf_log_group_arn
+
+  waf_enabled     = false
+  require_api_key = false
 }
 
 # -----------------------------------------------------------------------------

@@ -111,7 +111,7 @@ Testcontainers integration test executed rather than being skipped.
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint | clean, exit 0 |
-| checkov | 398 passed, **0 failed**, 33 skipped |
+| checkov | 417 passed, **0 failed**, 36 skipped |
 | `helm lint` / `helm template` / kubeconform | clean |
 | actionlint 1.7.7 — all four workflows | clean |
 | `scripts/check-action-pins.sh` | every action SHA-pinned |
@@ -470,13 +470,16 @@ true of an earlier tree and not of the committed one.
   Compose stack, but not as an automated suite.
 - `tests/performance` and `tests/security` do not exist. The k6 scripts are
   Phase 12 work.
-- Terraform modules named in the design but **not written**:
-  `internal-load-balancer`, `secrets`, `iam`, `disaster-recovery`. Because
-  `internal-load-balancer` is missing, the `api-gateway` module still has no
-  environment that calls it, and the EKS node security group accepts no
-  load-balancer source — nothing outside the cluster can reach a workload.
-  `scripts/validate-terraform.sh` validates uncalled modules separately so that
-  gap cannot rot unnoticed.
+- Terraform modules named in the design but **not written**: `secrets`, `iam`,
+  `disaster-recovery`. The consequence worth stating is that the per-service
+  IRSA roles the Helm chart's ServiceAccounts annotate do not exist, so no pod
+  could reach S3, Secrets Manager or the database until they are written.
+  Every module that *does* exist now has a caller.
+- The internal load balancer's **target is null on a first apply**, and that is
+  by design rather than an omission: the ALB is created by the AWS Load Balancer
+  Controller from the chart's Ingress, which needs the cluster, which needs the
+  load balancer's outputs. It is a documented two-phase apply, not a
+  dependency that resolves itself.
 - The `eks` module's **add-on versions are placeholders**. They are pinned rather
   than tracking the default, which is right, but an add-on version is not
   portable across Kubernetes minor versions and these have never been checked

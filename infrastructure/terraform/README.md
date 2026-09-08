@@ -70,23 +70,37 @@ account, or a hard-coded name. Environments supply those.
 | `eks` | Private-endpoint cluster, access entries rather than aws-auth, IRSA, and nodes whose pods cannot reach instance metadata | yes |
 | `cloudwatch` | Log groups and the full alarm set, including outbox age, consumer lag and stuck applications | yes |
 | `budgets` | Optional cost guardrail; refuses to create anything without both an amount and an address | yes |
-| `api-gateway` | REST API behind WAF, VPC Link to an internal NLB | **no — see below** |
+| `api-gateway` | REST API behind WAF, VPC Link to the internal NLB | yes |
+| `internal-load-balancer` | Internal NLB for the VPC Link, forwarding to the ALB the Helm chart creates | yes |
 
-`api-gateway` has no caller yet, because the `eks` and
-`internal-load-balancer` modules it would attach to are not written. It is still
-formatted, validated and scanned: `scripts/validate-terraform.sh` validates every
-module that no environment references, precisely so an uncalled module cannot rot
-unnoticed.
+**Every module now has a caller.** `scripts/validate-terraform.sh` still
+validates any module no environment references, precisely so an uncalled module
+cannot rot unnoticed — it currently reports none.
+
+### The edge chain
+
+```
+client -> API Gateway (WAF, JWT authorizer, throttling, usage plans, access logs)
+       -> VPC Link
+       -> internal NLB          (Terraform: this repository)
+       -> internal ALB          (AWS Load Balancer Controller, from the chart's Ingress)
+       -> pods
+```
+
+Two load balancers, because two constraints meet and neither bends: a REST API's
+VPC Link accepts a **network** load balancer and nothing else, and path routing
+is layer 7. The extra hop costs a few milliseconds and one more load balancer
+billed hourly; the alternative is an ingress controller inside the cluster,
+which trades the hop for a component to operate.
 
 ### Modules named in the design but not yet written
 
-`internal-load-balancer`, `secrets`, `iam`, `disaster-recovery`. Listed here
-rather than omitted, so the gap is visible.
+`secrets`, `iam`, `disaster-recovery`. Listed here rather than omitted, so the
+gap is visible.
 
-Because `internal-load-balancer` is missing, the `api-gateway` module still has
-no caller, and the EKS node security group accepts no load-balancer source —
-`load_balancer_security_group_ids` is empty, so nothing outside the cluster can
-reach a workload. That is the safe direction to be wrong in.
+Their absence has a consequence worth stating: the per-service IRSA roles the
+Helm chart's ServiceAccounts annotate do not exist, so a deployment would need
+them written before any pod could reach S3, Secrets Manager or the database.
 
 ### HA is not DR
 
@@ -114,7 +128,7 @@ Last run 2026-09-07, via `scripts/validate-terraform.sh`:
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint 0.64.0 | clean, exit 0 |
-| checkov 3.3.8 | **398 passed, 0 failed, 33 skipped** |
+| checkov 3.3.8 | **417 passed, 0 failed, 36 skipped** |
 
 Every suppression carries a written justification, and most are inline on the
 resource rather than global, so the next genuine occurrence of the same check

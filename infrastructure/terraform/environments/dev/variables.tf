@@ -110,3 +110,37 @@ variable "cluster_admin_role_arns" {
   type        = list(string)
   default     = ["arn:aws:iam::000000000000:role/platform-engineering-admin"]
 }
+
+variable "internal_tls_certificate_arn" {
+  description = <<-EOT
+    ACM certificate for the internal load balancer's TLS listener.
+
+    Null by default, which turns TLS off -- and with it the NLB's access logs,
+    because an NLB writes them for TLS listeners only. Supply a certificate for
+    anything beyond a first apply.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "internal_alb_arn" {
+  description = <<-EOT
+    The ALB the Helm chart's Ingress creates, for the NLB to forward to.
+
+    NULL ON A FIRST APPLY, deliberately. The ALB is created by the AWS Load
+    Balancer Controller once the chart is installed, which needs the cluster,
+    which needs the load balancer. Supply it on a second apply.
+  EOT
+  type        = string
+  default     = null
+}
+
+variable "cognito_user_pool_arns" {
+  description = <<-EOT
+    Cognito user pools the API Gateway authorizer trusts.
+
+    PLACEHOLDER, and it names no real account or pool.
+  EOT
+  type        = list(string)
+  default     = ["arn:aws:cognito-idp:eu-west-1:000000000000:userpool/eu-west-1_EXAMPLE"]
+}
