@@ -142,11 +142,15 @@ spec:
             # image is built to tolerate.
             - name: tmp
               mountPath: /tmp/los
-            {{- if $.Values.secrets.enabled }}
-            # Secrets are projected as FILES by the Secrets Store CSI driver and
-            # read through a Spring config tree. Never environment variables:
-            # those are visible in the pod spec, in `kubectl describe`, and in
-            # any crash dump that captures the environment.
+            {{- if and $.Values.secrets.enabled (eq $serviceName "application-service") }}
+            # Only the application service mounts anything: the database password
+            # is gone -- the aws profile authenticates to RDS with the pod's IAM
+            # role -- and the applicant pepper is derived by this service alone.
+            #
+            # Projected as a FILE by the Secrets Store CSI driver and read through
+            # a Spring config tree. Never an environment variable: those are
+            # visible in the pod spec, in `kubectl describe`, and in any crash
+            # dump that captures the environment.
             - name: secrets
               mountPath: /etc/secrets
               readOnly: true
@@ -205,7 +209,11 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 64Mi
-        {{- if $.Values.secrets.enabled }}
+        {{- if and $.Values.secrets.enabled (eq $serviceName "application-service") }}
+        # Conditional on the same test as the mount and the SecretProviderClass.
+        # A CSI volume referencing a class that was not rendered leaves the pod in
+        # ContainerCreating with a message about a missing provider class, which
+        # reads like a driver fault rather than a template one.
         - name: secrets
           csi:
             driver: secrets-store.csi.k8s.io

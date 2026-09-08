@@ -234,11 +234,34 @@ spring:
       on-profile: aws
 
   datasource:
-    url: ${LOS_DATASOURCE_URL}
+    # IAM DATABASE AUTHENTICATION. NO PASSWORD ANYWHERE.
+    #
+    # The pod's IAM role is the credential, exactly as it already is for MSK
+    # below. The AWS Advanced JDBC Wrapper obtains a short-lived authentication
+    # token from RDS on each connection and refreshes it before it expires, so
+    # there is no long-lived secret to rotate, leak, or accidentally log -- and
+    # nothing for an attacker to steal from a mounted file.
+    #
+    # The url carries the aws-wrapper scheme and the driver is the wrapper's, not
+    # pgjdbc's. Both are required: the wrapper delegates to pgjdbc underneath.
+    url: jdbc:aws-wrapper:postgresql://${LOS_DATASOURCE_HOST}:${LOS_DATASOURCE_PORT:5432}/${LOS_DATASOURCE_NAME}
     username: ${LOS_DATASOURCE_USERNAME}
-    # Read from the Secrets Store CSI mount via the config tree import above, as
-    # los.datasource.password. Never set from an environment variable.
-    password: ${los.datasource.password:}
+    driver-class-name: software.amazon.jdbc.Driver
+
+    hikari:
+      data-source-properties:
+        # Only the IAM plugin. The wrapper ships failover, read-write splitting
+        # and others; enabling what is not needed adds behaviour to debug during
+        # an incident.
+        wrapperPlugins: iam
+        # The host the token is signed for. It must match the endpoint being
+        # connected to, or RDS rejects the token with an error that reads like a
+        # bad password.
+        iamHost: ${LOS_DATASOURCE_HOST}
+        iamRegion: ${LOS_AWS_REGION}
+        # Shorter than the token's 15-minute validity, so a connection is never
+        # opened with a token that expires mid-handshake.
+        iamExpiration: 840
 
   kafka:
     bootstrap-servers: ${LOS_KAFKA_BOOTSTRAP_SERVERS}

@@ -18,7 +18,13 @@ metadata:
   labels:
     {{- include "los.labels" $ctx | nindent 4 }}
 data:
-  LOS_DATASOURCE_URL: {{ printf "jdbc:postgresql://%s:%v/%s" $.Values.database.host (int $.Values.database.port) $.Values.database.name | quote }}
+  # Host, port and name rather than a prebuilt URL. The aws profile builds a
+  # jdbc:aws-wrapper: URL from them, and the IAM plugin needs the bare host
+  # separately anyway: the auth token is signed for a host, and a token signed
+  # for the wrong one is rejected with an error that reads like a bad password.
+  LOS_DATASOURCE_HOST: {{ $.Values.database.host | quote }}
+  LOS_DATASOURCE_PORT: {{ $.Values.database.port | quote }}
+  LOS_DATASOURCE_NAME: {{ $.Values.database.name | quote }}
   LOS_DATASOURCE_USERNAME: {{ printf "los_%s_runtime" (trimSuffix "-service" $serviceName) | quote }}
   LOS_KAFKA_BOOTSTRAP_SERVERS: {{ $.Values.kafka.bootstrapServers | quote }}
   LOS_OAUTH2_ISSUER_URI: {{ $.Values.oauth2.issuerUri | quote }}

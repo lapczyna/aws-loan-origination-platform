@@ -39,8 +39,8 @@ Each service uses **two** database identities:
 
 | Role | Used by | Privileges |
 |---|---|---|
-| `<service>_migrator` | Flyway, at startup | `CREATE`, `ALTER`, `DROP` within its own schema |
-| `<service>_runtime` | The running service | `SELECT`, `INSERT`, `UPDATE`, `DELETE` on its own tables — and nothing else |
+| `los_<context>_migrator` | Flyway, at startup | `CREATE`, `ALTER`, `DROP` within its own schema |
+| `los_<context>_runtime` | The running service | `SELECT`, `INSERT`, `UPDATE`, `DELETE` on its own tables — and nothing else |
 
 Splitting them means a compromised running service cannot alter the schema, and
 in the audit context it is what makes the append-only guarantee real: the audit
@@ -53,25 +53,25 @@ real database.
 ```sql
 -- As the master user, once per service.
 
-CREATE ROLE application_migrator LOGIN;
-CREATE ROLE application_runtime LOGIN;
+CREATE ROLE los_application_migrator LOGIN;
+CREATE ROLE los_application_runtime LOGIN;
 
 -- IAM authentication rather than passwords, for both.
-GRANT rds_iam TO application_migrator;
-GRANT rds_iam TO application_runtime;
+GRANT rds_iam TO los_application_migrator;
+GRANT rds_iam TO los_application_runtime;
 
-CREATE SCHEMA IF NOT EXISTS application AUTHORIZATION application_migrator;
+CREATE SCHEMA IF NOT EXISTS application AUTHORIZATION los_application_migrator;
 
 -- The runtime role may use the schema but not change it.
-GRANT USAGE ON SCHEMA application TO application_runtime;
+GRANT USAGE ON SCHEMA application TO los_application_runtime;
 
 -- Applies to tables Flyway creates LATER, which is the part that is easy to
 -- forget: without it, every new migration needs a manual grant.
-ALTER DEFAULT PRIVILEGES FOR ROLE application_migrator IN SCHEMA application
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO application_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE los_application_migrator IN SCHEMA application
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO los_application_runtime;
 
-ALTER DEFAULT PRIVILEGES FOR ROLE application_migrator IN SCHEMA application
-    GRANT USAGE, SELECT ON SEQUENCES TO application_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE los_application_migrator IN SCHEMA application
+    GRANT USAGE, SELECT ON SEQUENCES TO los_application_runtime;
 
 -- Nobody connects as the public role.
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
@@ -82,7 +82,7 @@ The audit context is the exception, and deliberately narrower — it is applied 
 schema that depends on it:
 
 ```sql
-GRANT SELECT, INSERT ON audit.audit_record TO audit_runtime;
+GRANT SELECT, INSERT ON audit.audit_record TO los_audit_runtime;
 -- No UPDATE. No DELETE. Not an oversight.
 ```
 

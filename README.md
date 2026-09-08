@@ -312,8 +312,9 @@ infrastructure failure. See
 | How do three services work without applicant personal data? | [ADR-0010](docs/adr/0010-pseudonymous-applicant-reference.md) — HMAC pseudonym, peppered from a file |
 | Why is a retry safe? | [ADR-0012](docs/adr/0012-idempotency-keys.md) — canonical request fingerprints |
 | How is the API contract kept honest? | [ADR-0016](docs/adr/0016-openapi-generated-from-the-code.md) — generated from the code, drift fails the build |
+| Where is the database password? | [ADR-0017](docs/adr/0017-iam-database-authentication.md) — there isn't one; the pod's IAM role is the credential |
 
-All sixteen are indexed in [`docs/adr/`](docs/adr/README.md).
+All seventeen are indexed in [`docs/adr/`](docs/adr/README.md).
 
 ---
 

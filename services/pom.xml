@@ -96,6 +96,16 @@
       by the "aws" Spring profile; the "local" profile talks PLAINTEXT to a
       container and never loads it.
     -->
+    <!--
+      Only used by the aws profile, where the datasource url carries the
+      aws-wrapper scheme. Local and test profiles use pgjdbc directly, so this
+      is inert there.
+    -->
+    <dependency>
+      <groupId>software.amazon.jdbc</groupId>
+      <artifactId>aws-advanced-jdbc-wrapper</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>software.amazon.msk</groupId>
       <artifactId>aws-msk-iam-auth</artifactId>

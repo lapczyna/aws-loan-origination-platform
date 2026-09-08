@@ -24,10 +24,11 @@ change a decision: write a new one and mark the old superseded.
 | [0010](0010-pseudonymous-applicant-reference.md) | An HMAC pseudonym for the applicant, peppered from a file | Accepted |
 | [0011](0011-presigned-uploads.md) | Direct-to-S3 presigned uploads | Accepted |
 | [0012](0012-idempotency-keys.md) | Idempotency keys with a canonical request fingerprint | Accepted |
-| [0013](0013-secrets-as-files.md) | Secrets reach pods as files, not environment variables | Accepted |
+| [0013](0013-secrets-as-files.md) | Secrets reach pods as files, not environment variables | Accepted, amended by 0017 |
 | [0014](0014-end-to-end-tests-as-separate-processes.md) | The end-to-end suite runs the services as separate processes | Accepted |
 | [0015](0015-single-helm-chart-over-a-services-map.md) | One Helm chart templated over a services map | Accepted |
 | [0016](0016-openapi-generated-from-the-code.md) | The OpenAPI document is generated from the code, and committed | Accepted |
+| [0017](0017-iam-database-authentication.md) | IAM database authentication, and no database password at all | Accepted |
 
 ## The two most consequential
 

@@ -26,34 +26,6 @@
 
 locals {
   common_tags = merge(var.tags, { Module = "secrets" })
-
-  # One database credential per service. The chart mounts
-  # "<environment>/los/<service>/datasource-password" into each pod, and the iam
-  # module grants each service its own entry and no other.
-  database_secrets = {
-    for service in var.services :
-    service => "${var.environment}/los/${service}/datasource-password"
-  }
-}
-
-# -----------------------------------------------------------------------------
-# Per-service database credentials.
-# -----------------------------------------------------------------------------
-resource "aws_secretsmanager_secret" "database" {
-  for_each = local.database_secrets
-
-  name        = each.value
-  description = "Database password for ${each.key} in ${var.environment}. Set out of band; never through Terraform."
-
-  kms_key_id = var.kms_key_arn
-
-  # A window, not immediate deletion. Deleting a secret the platform is using
-  # takes it down, and the window is the only chance to notice. Zero would make
-  # `terraform destroy` irreversible for the one resource whose loss is hardest
-  # to recover from.
-  recovery_window_in_days = var.recovery_window_in_days
-
-  tags = merge(local.common_tags, { Service = each.key })
 }
 
 # -----------------------------------------------------------------------------
@@ -90,78 +62,30 @@ resource "aws_secretsmanager_secret" "applicant_pepper" {
 # -----------------------------------------------------------------------------
 # Rotation.
 #
-# Configured only where a rotation function exists. AWS Secrets Manager rotation
-# requires a Lambda that knows how to change the credential at its source, and
-# writing one is a real piece of work rather than a flag -- so this is off by
-# default and the module says so, instead of implying a rotation that never
-# happens.
+# There is nothing here to rotate on a schedule, and that is the point of the
+# change that removed it. The services authenticate to PostgreSQL with IAM
+# database authentication -- the pod's IAM role is the credential, and RDS issues
+# a token valid for fifteen minutes -- so there is no database password to
+# rotate, leak or log.
 #
-# The RDS MASTER password is a separate matter and is already handled: the
+# The RDS MASTER password still exists and is already handled: the
 # rds-postgresql module sets manage_master_user_password, so AWS generates,
-# stores and rotates it, and it never passes through Terraform at all.
+# stores and rotates it, and it never passes through Terraform.
+#
+# The applicant pepper is deliberately never rotated on a schedule. Doing so
+# would corrupt data rather than protect it. See ADR-0010.
 # -----------------------------------------------------------------------------
-resource "aws_secretsmanager_secret_rotation" "database" {
-  for_each = var.rotation_lambda_arn == null ? {} : local.database_secrets
-
-  secret_id           = aws_secretsmanager_secret.database[each.key].id
-  rotation_lambda_arn = var.rotation_lambda_arn
-
-  rotation_rules {
-    automatically_after_days = var.rotation_days
-  }
-}
 
 # -----------------------------------------------------------------------------
 # Resource policies.
 #
-# Defence in depth. The iam module already grants each service its own secret and
-# no other; this says the same thing from the resource's side, so a mistakenly
-# broad identity policy elsewhere does not open the secret.
+# Defence in depth. The iam module already grants the pepper to the application
+# service alone; this says the same thing from the resource's side, so a
+# mistakenly broad identity policy elsewhere does not open it.
 #
 # The two controls have to BOTH allow: an identity policy grant that the resource
 # policy does not permit is denied, and the reverse likewise.
 # -----------------------------------------------------------------------------
-data "aws_iam_policy_document" "database" {
-  for_each = var.enforce_resource_policies ? local.database_secrets : {}
-
-  statement {
-    sid    = "OnlyTheOwningServiceAndAdministrators"
-    effect = "Deny"
-
-    principals {
-      type        = "AWS"
-      identifiers = ["*"]
-    }
-
-    actions   = ["secretsmanager:GetSecretValue"]
-    resources = ["*"]
-
-    # Everyone EXCEPT the owning service's role and the named administrators.
-    # A deny with a NotPrincipal-style condition rather than an allow, because an
-    # allow here would have to enumerate every legitimate caller including the
-    # ones AWS uses internally.
-    condition {
-      test     = "ArnNotEquals"
-      variable = "aws:PrincipalArn"
-      values = concat(
-        [lookup(var.service_role_arns, each.key, "arn:${var.aws_partition}:iam::${var.account_id}:role/nonexistent")],
-        var.secret_administrator_role_arns,
-      )
-    }
-  }
-}
-
-resource "aws_secretsmanager_secret_policy" "database" {
-  for_each = var.enforce_resource_policies ? local.database_secrets : {}
-
-  secret_arn = aws_secretsmanager_secret.database[each.key].arn
-  policy     = data.aws_iam_policy_document.database[each.key].json
-
-  # Refuses a policy that would lock the secret away from everyone, which is
-  # otherwise an easy mistake to make and a hard one to undo.
-  block_public_policy = true
-}
-
 data "aws_iam_policy_document" "applicant_pepper" {
   count = var.enforce_resource_policies ? 1 : 0
 
@@ -181,7 +105,7 @@ data "aws_iam_policy_document" "applicant_pepper" {
       test     = "ArnNotEquals"
       variable = "aws:PrincipalArn"
       values = concat(
-        [lookup(var.service_role_arns, "application-service", "arn:${var.aws_partition}:iam::${var.account_id}:role/nonexistent")],
+        [coalesce(var.application_service_role_arn, "arn:${var.aws_partition}:iam::${var.account_id}:role/nonexistent")],
         var.secret_administrator_role_arns,
       )
     }

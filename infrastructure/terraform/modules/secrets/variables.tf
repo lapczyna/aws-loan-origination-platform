@@ -14,37 +14,9 @@ variable "account_id" {
   type        = string
 }
 
-variable "services" {
-  description = <<-EOT
-    Services that each get their own database credential.
-
-    One secret per service rather than one shared credential: a shared password
-    means a compromise of any service is a compromise of every service's database
-    access, and rotating it requires restarting all of them at once.
-  EOT
-  type        = list(string)
-  default     = ["application-service", "workflow-service", "document-service", "audit-service"]
-}
-
 variable "kms_key_arn" {
   description = "Customer managed key encrypting these secrets. The services are granted kms:Decrypt on it, bound by a ViaService condition."
   type        = string
-}
-
-variable "recovery_window_in_days" {
-  description = <<-EOT
-    Deletion window for the service credentials.
-
-    A window, not immediate deletion. Zero makes `terraform destroy`
-    irreversible for the resources whose loss is hardest to recover from.
-  EOT
-  type        = number
-  default     = 30
-
-  validation {
-    condition     = var.recovery_window_in_days >= 7
-    error_message = "A recovery window shorter than seven days leaves no realistic chance to notice an accidental deletion."
-  }
 }
 
 variable "pepper_recovery_window_in_days" {
@@ -67,31 +39,6 @@ variable "pepper_recovery_window_in_days" {
 # -----------------------------------------------------------------------------
 # Rotation
 # -----------------------------------------------------------------------------
-variable "rotation_lambda_arn" {
-  description = <<-EOT
-    Rotation function for the database credentials, or null.
-
-    NULL, and the module says so rather than implying a rotation that never
-    happens. Secrets Manager rotation needs a Lambda that knows how to change the
-    credential at its source; writing one is real work, not a flag.
-
-    The RDS MASTER password is separate and already handled: the rds-postgresql
-    module sets manage_master_user_password, so AWS generates, stores and rotates
-    it and it never passes through Terraform.
-
-    The applicant pepper is deliberately never rotated on a schedule. See
-    ADR-0010.
-  EOT
-  type        = string
-  default     = null
-}
-
-variable "rotation_days" {
-  description = "Rotation interval, when a rotation function exists."
-  type        = number
-  default     = 30
-}
-
 # -----------------------------------------------------------------------------
 # Resource policies
 # -----------------------------------------------------------------------------
@@ -108,17 +55,16 @@ variable "enforce_resource_policies" {
   default     = true
 }
 
-variable "service_role_arns" {
+variable "application_service_role_arn" {
   description = <<-EOT
-    Service name to IAM role ARN, from the iam module.
+    The application service's role, the only principal permitted to read the
+    pepper.
 
-    A service missing from this map gets a resource policy that permits no
-    service at all, which fails closed. That is the intended direction, but it
-    fails at runtime rather than at plan time, so keep it in step with the iam
-    module's outputs.
+    Null leaves a resource policy that permits no service at all, which fails
+    closed -- the intended direction, but at runtime rather than at plan time.
   EOT
-  type        = map(string)
-  default     = {}
+  type        = string
+  default     = null
 }
 
 variable "secret_administrator_role_arns" {

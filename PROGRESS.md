@@ -111,7 +111,7 @@ Testcontainers integration test executed rather than being skipped.
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint | clean, exit 0 |
-| checkov | 533 passed, **0 failed**, 37 skipped |
+| checkov | 519 passed, **0 failed**, 37 skipped |
 | `helm lint` / `helm template` / kubeconform | clean |
 | actionlint 1.7.7 — all four workflows | clean |
 | `scripts/check-action-pins.sh` | every action SHA-pinned |
@@ -473,16 +473,13 @@ true of an earlier tree and not of the committed one.
   weaker versions of them.
 - **Every Terraform module the design named now exists**, and every one is
   called by both environments.
-- **No secret has a rotation function.** The `secrets` module supports one and
-  none is written: Secrets Manager rotation needs a Lambda that knows how to
-  change the credential at its source, which is real work rather than a flag.
-  The RDS master password is the exception and is already rotated by AWS. The
-  applicant pepper is deliberately never rotated on a schedule — doing so would
-  corrupt data rather than protect it.
-- **After a first apply the secrets exist and are empty**, so every pod that
-  mounts one fails to start. That is the intended failure: a placeholder value
-  that let the platform start would be a working system with a known credential
-  in it.
+- **There is one secret left, and it is deliberately never rotated.** The
+  applicant pepper: rotating it would corrupt data rather than protect it
+  (ADR-0010). Every database password is gone. The RDS master password still
+  exists for the bootstrap and is generated and rotated by AWS.
+- **After a first apply the pepper exists and is empty**, so the application
+  service fails to start. That is the intended failure: a placeholder value that
+  let the platform start would be a working system with a known secret in it.
 - The **AWS Load Balancer Controller's IAM policy is not in this repository**,
   deliberately. Its role, and the roles for the cluster autoscaler and the EBS
   CSI driver, are created by the `eks` module with IRSA. The autoscaler's policy
@@ -493,12 +490,11 @@ true of an earlier tree and not of the committed one.
   to create a load balancer with an error naming an action nobody can find.
   Until it is supplied the role exists and can do nothing, which is the safe
   direction.
-- **The chart mounts a database password while the RDS module enables IAM
-  database authentication.** Both paths are real and only one should survive a
-  deployment. The `iam` module grants both — `rds-db:connect` scoped to the
-  service's own runtime user, and `secretsmanager:GetSecretValue` on that
-  service's own secret — rather than silently picking a side. Resolving it is a
-  decision, not a cleanup.
+- **The IAM database token flow has never run.** The services now authenticate
+  to RDS with the pod's IAM role and hold no database password (ADR-0017). What
+  was verified is that the driver resolves, ships in the image, and leaves the
+  local and test profiles unaffected. Whether a real RDS instance accepts a real
+  token is unverified, because there is no RDS instance.
 - The internal load balancer's **target is null on a first apply**, and that is
   by design rather than an omission: the ALB is created by the AWS Load Balancer
   Controller from the chart's Ingress, which needs the cluster, which needs the

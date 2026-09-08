@@ -172,10 +172,14 @@ data "aws_iam_policy_document" "service" {
   # Scoped to ONE database user. `dbuser:*/*` would let any service connect as
   # any role, including the migration role that can drop tables.
   statement {
-    sid       = "ConnectToOwnDatabaseUser"
-    effect    = "Allow"
-    actions   = ["rds-db:connect"]
-    resources = ["arn:${var.aws_partition}:rds-db:${var.region}:${var.account_id}:dbuser:${var.db_resource_id}/${replace(each.key, "-service", "")}_runtime"]
+    sid     = "ConnectToOwnDatabaseUser"
+    effect  = "Allow"
+    actions = ["rds-db:connect"]
+    # "los_application_runtime", matching V2__runtime_role_grants.sql, which is
+    # the authoritative name because it is the statement that creates the role.
+    # This grant was wrong until IAM authentication made the username
+    # load-bearing: with a password, a mismatched grant is unused and invisible.
+    resources = ["arn:${var.aws_partition}:rds-db:${var.region}:${var.account_id}:dbuser:${var.db_resource_id}/los_${replace(each.key, "-service", "")}_runtime"]
   }
 
   # -- Kafka ----------------------------------------------------------------
@@ -258,13 +262,6 @@ data "aws_iam_policy_document" "service" {
   # The trailing "-*" is not laziness: Secrets Manager appends six random
   # characters to every secret ARN, so the exact ARN is not knowable from the
   # name alone.
-  statement {
-    sid       = "ReadOwnDatabaseSecret"
-    effect    = "Allow"
-    actions   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-    resources = ["arn:${var.aws_partition}:secretsmanager:${var.region}:${var.account_id}:secret:${var.environment}/los/${each.key}/datasource-password-*"]
-  }
-
   dynamic "statement" {
     for_each = each.value.reads_applicant_pepper ? [1] : []
 
@@ -276,7 +273,10 @@ data "aws_iam_policy_document" "service" {
     }
   }
 
-  # Decrypting those secrets, and only in the course of retrieving them.
+  # Decrypting that secret, and only in the course of retrieving it.
+  # Kept for every service rather than only the application service: the
+  # Secrets Store CSI driver resolves the key on the pod's behalf, and a
+  # service that later mounts a secret should not need an IAM change too.
   statement {
     sid       = "DecryptSecrets"
     effect    = "Allow"

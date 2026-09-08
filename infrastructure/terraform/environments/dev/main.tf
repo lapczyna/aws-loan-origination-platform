@@ -471,9 +471,9 @@ module "secrets" {
   account_id  = local.account_id
   kms_key_arn = module.kms_database[0].key_arn
 
-  # Each secret's resource policy names the one service allowed to read it, so a
+  # The pepper's resource policy names the one service allowed to read it, so a
   # mistakenly broad identity policy elsewhere does not open it.
-  service_role_arns              = module.iam[0].role_arns
+  application_service_role_arn   = module.iam[0].role_arns["application-service"]
   secret_administrator_role_arns = var.secret_administrator_role_arns
 }
 
