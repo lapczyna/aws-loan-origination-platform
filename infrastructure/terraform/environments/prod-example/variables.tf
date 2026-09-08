@@ -111,3 +111,19 @@ variable "budget_notification_emails" {
   type        = list(string)
   default     = []
 }
+
+variable "cluster_admin_role_arns" {
+  description = <<-EOT
+    IAM ROLES granted cluster-admin on the EKS cluster.
+
+    PLACEHOLDER, and it names no real account. The cluster creator is
+    deliberately NOT granted admin automatically -- that default hands
+    cluster-admin to whichever principal happened to run `terraform apply`, often
+    a CI role, which then holds standing admin nobody decided to grant.
+
+    Roles, never users: a role can be assumed with MFA and its session is
+    time-bounded and auditable.
+  EOT
+  type        = list(string)
+  default     = ["arn:aws:iam::000000000000:role/platform-engineering-admin"]
+}

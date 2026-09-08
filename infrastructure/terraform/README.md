@@ -67,6 +67,7 @@ account, or a hard-coded name. Environments supply those.
 | `s3-documents` | Quarantine and accepted prefixes, presigned-upload CORS, lifecycle | yes |
 | `s3-audit` | Object Lock, versioning, an explicit deny on deletion, access logging | yes |
 | `ecr` | Immutable tags, scan on push | yes |
+| `eks` | Private-endpoint cluster, access entries rather than aws-auth, IRSA, and nodes whose pods cannot reach instance metadata | yes |
 | `cloudwatch` | Log groups and the full alarm set, including outbox age, consumer lag and stuck applications | yes |
 | `budgets` | Optional cost guardrail; refuses to create anything without both an amount and an address | yes |
 | `api-gateway` | REST API behind WAF, VPC Link to an internal NLB | **no — see below** |
@@ -79,8 +80,13 @@ unnoticed.
 
 ### Modules named in the design but not yet written
 
-`eks`, `internal-load-balancer`, `secrets`, `iam`, `disaster-recovery`. Listed
-here rather than omitted, so the gap is visible.
+`internal-load-balancer`, `secrets`, `iam`, `disaster-recovery`. Listed here
+rather than omitted, so the gap is visible.
+
+Because `internal-load-balancer` is missing, the `api-gateway` module still has
+no caller, and the EKS node security group accepts no load-balancer source —
+`load_balancer_security_group_ids` is empty, so nothing outside the cluster can
+reach a workload. That is the safe direction to be wrong in.
 
 ### HA is not DR
 
@@ -108,7 +114,7 @@ Last run 2026-09-07, via `scripts/validate-terraform.sh`:
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint 0.64.0 | clean, exit 0 |
-| checkov 3.3.8 | **296 passed, 0 failed, 33 skipped** |
+| checkov 3.3.8 | **398 passed, 0 failed, 33 skipped** |
 
 Every suppression carries a written justification, and most are inline on the
 resource rather than global, so the next genuine occurrence of the same check

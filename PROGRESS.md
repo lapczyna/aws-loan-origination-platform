@@ -111,7 +111,7 @@ Testcontainers integration test executed rather than being skipped.
 | `terraform fmt -check -recursive` | clean |
 | `terraform validate` — dev, prod-example, uncalled modules | valid |
 | tflint | clean, exit 0 |
-| checkov | 296 passed, **0 failed**, 33 skipped |
+| checkov | 398 passed, **0 failed**, 33 skipped |
 | `helm lint` / `helm template` / kubeconform | clean |
 | actionlint 1.7.7 — all four workflows | clean |
 | `scripts/check-action-pins.sh` | every action SHA-pinned |
@@ -470,11 +470,17 @@ true of an earlier tree and not of the committed one.
   Compose stack, but not as an automated suite.
 - `tests/performance` and `tests/security` do not exist. The k6 scripts are
   Phase 12 work.
-- Terraform modules named in the design but **not written**: `eks`,
+- Terraform modules named in the design but **not written**:
   `internal-load-balancer`, `secrets`, `iam`, `disaster-recovery`. Because
-  `eks` and `internal-load-balancer` are missing, the `api-gateway` module has
-  no environment that calls it; `scripts/validate-terraform.sh` validates
-  uncalled modules separately so that gap cannot rot unnoticed.
+  `internal-load-balancer` is missing, the `api-gateway` module still has no
+  environment that calls it, and the EKS node security group accepts no
+  load-balancer source — nothing outside the cluster can reach a workload.
+  `scripts/validate-terraform.sh` validates uncalled modules separately so that
+  gap cannot rot unnoticed.
+- The `eks` module's **add-on versions are placeholders**. They are pinned rather
+  than tracking the default, which is right, but an add-on version is not
+  portable across Kubernetes minor versions and these have never been checked
+  against a real cluster — because there is no cluster.
 - There is **no `environments/local`** for Terraform, deliberately. The local
   environment is Docker Compose. A Terraform "local" environment that provisions
   nothing would be a directory that has to be maintained and proves nothing.

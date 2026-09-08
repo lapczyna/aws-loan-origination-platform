@@ -223,10 +223,10 @@ module "database" {
   private_subnet_ids = module.networking[0].data_subnet_ids
   kms_key_arn        = module.kms_database[0].key_arn
 
-  # Nothing is allowed to connect until the EKS node security group exists.
-  # Wiring it here rather than leaving the list empty would create a circular
-  # dependency; the association is made by the EKS module in a later phase.
-  allowed_security_group_ids = []
+  # The EKS nodes, and nothing else. A security-group grant follows the
+  # workload; a CIDR grant would follow whatever holds an address in that range
+  # now or later.
+  allowed_security_group_ids = [module.eks[0].node_security_group_id]
 
   instance_class    = "db.t4g.micro"
   allocated_storage = 20
@@ -284,7 +284,7 @@ module "events" {
   environment                = var.environment
   vpc_id                     = module.networking[0].vpc_id
   private_subnet_ids         = module.networking[0].data_subnet_ids
-  allowed_security_group_ids = []
+  allowed_security_group_ids = [module.eks[0].node_security_group_id]
   kms_key_arn                = module.kms_observability[0].key_arn
   broker_log_group_name      = module.cloudwatch[0].msk_broker_log_group_name
 
@@ -298,6 +298,44 @@ module "events" {
   # Cheaper monitoring in development: per-partition metrics are billed as
   # custom metrics and there is nothing here to diagnose.
   enhanced_monitoring = "PER_BROKER"
+}
+
+# -----------------------------------------------------------------------------
+# Kubernetes.
+#
+# COST: the control plane is billed hourly at a fixed rate whether or not a pod
+# is running, and the nodes are billed per instance-hour on top. Neither scales
+# to zero.
+# -----------------------------------------------------------------------------
+module "eks" {
+  source = "../../modules/eks"
+  count  = local.enabled
+
+  environment        = var.environment
+  vpc_id             = module.networking[0].vpc_id
+  private_subnet_ids = module.networking[0].private_subnet_ids
+
+  kubernetes_version = "1.31"
+
+  # The cluster's own key encrypts Kubernetes Secrets and the node volumes; the
+  # observability key encrypts the control plane log group, which is where the
+  # audit log goes.
+  kms_key_arn     = module.kms_database[0].key_arn
+  log_kms_key_arn = module.kms_observability[0].key_arn
+
+  # The API server has no public endpoint. Reach it through SSM Session Manager
+  # or a VPN.
+  endpoint_public_access = false
+
+  cluster_admin_role_arns = var.cluster_admin_role_arns
+
+  # COST: the smallest instances that will run the four services, and two
+  # nodes rather than three. A zone failure in development is an
+  # inconvenience.
+  node_instance_types = ["t4g.medium"]
+  node_desired_size   = 2
+  node_min_size       = 2
+  node_max_size       = 4
 }
 
 # -----------------------------------------------------------------------------
