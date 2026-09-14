@@ -21,7 +21,7 @@
 # a vulnerability scan of it expires the moment the tag moves. The digest is the
 # only identifier that names one specific set of bytes.
 # -----------------------------------------------------------------------------
-FROM eclipse-temurin:25-jdk-noble@sha256:534968c051301957beae735e7ba1db54d99ddecf08746d3b9d4f318cc132dbc3 AS build
+FROM eclipse-temurin:25-jdk-noble@sha256:264fafc3390db78c93dc51da0109a0d66ad1fb59f7a893f12b7e3df1f15e52da AS build
 
 WORKDIR /build
 
@@ -83,7 +83,7 @@ RUN java -Djarmode=tools -jar /build/application.jar extract --layers --destinat
 # attacker could use to build or inspect is simply absent, and the image is
 # roughly a third of the size.
 # -----------------------------------------------------------------------------
-FROM eclipse-temurin:25-jre-noble@sha256:b4c93a50fc67612798db73d68ca3b0ee4ebdd51736e59cca370e689b9797037e AS runtime
+FROM eclipse-temurin:25-jre-noble@sha256:d120abd9d8d7dec94520ce974ece62d0e4eed8576eb00bbc84e6128307ab48ef AS runtime
 
 ARG SERVICE_NAME
 ARG VERSION="0.0.0-dev"
